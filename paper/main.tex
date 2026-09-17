@@ -2,7 +2,8 @@
 % Uses TMLR template (tmlr.sty) — download from https://jmlr.org/tmlr/
 % Compile with: pdflatex main && bibtex main && pdflatex main && pdflatex main
 
-\documentclass[accepted]{tmlr}
+\documentclass{article}
+\usepackage{tmlr}
 
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
@@ -410,7 +411,7 @@ This work uses publicly available code-switched corpora (GLUECoS, Bangor Miami) 
 % REFERENCES
 % ============================================================
 \bibliography{references}
-\bibliographystyle{tmlr}
+\bibliographystyle{plainnat}
 
 
 % ============================================================
