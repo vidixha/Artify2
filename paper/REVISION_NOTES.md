@@ -47,14 +47,29 @@ Changes from earlier drafts:
 Model details (layers, heads, encoder sizes) and all results come from the
 author's draft and code-verified answers.
 
-## Experiments that would most strengthen the paper
+## Experiments required by the TMLR-style review
 
-1. A random control drawn from the same layers as the top heads.
-2. Head sets contrasted between languages instead of absolute top-20 sets.
-3. A proper fluency measure (e.g. character error rate against the rendered
-   sentence), with a script change counted only for fluent output.
-4. Script probes with folds grouped by image (GroupKFold).
-5. A collapse check on the Spanish-English ablation.
+The paper now claims only what the current evidence supports. RQ1 is framed as
+"does modality change which heads matter" (answered). RQ2 is framed as "are the
+heads language-specific" (not answered). These experiments would answer RQ2 and
+move the paper toward accept:
+
+1. **Language-specific ablation (critical).** Ablate head sets contrasted
+   between languages (top heads by Hindi score minus English score, and the
+   reverse), plus random heads matched by layer. Measure teacher-forced loss
+   separately on the English and Hindi tokens of each code-switched sentence
+   (the gold token labels allow this): Delta L_en and Delta L_hi per head set.
+   Routing predicts that Hindi-contrastive heads raise Delta L_hi more than
+   Delta L_en, and the reverse for English. Loss-based measures avoid the
+   generation collapse.
+2. **Layer-matched control.** For each ablated set, draw random heads with the
+   same per-layer counts (for Qwen2-VL-2B, mostly from layers 0-1).
+3. **Grouped probe evaluation.** Re-run the script probes with GroupKFold by
+   image, or with disjoint train and test images.
+4. **Script vs. language.** Score heads on transliterated Hindi (Latin script)
+   alongside Hindi (Devanagari) and English (Latin), and compare the head sets.
+   This separates script from language.
+5. **Spanish-English collapse check.** Apply the fluency check to Table 11.
 
 ## Before camera-ready
 
