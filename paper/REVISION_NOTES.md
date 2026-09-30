@@ -28,6 +28,21 @@ Changes from earlier drafts:
   Qwen2.5 report states only that pretraining data grew from 7T to 18T tokens.
   It does not say whether Qwen2.5 was initialized from Qwen2.
 - The description of Materzynska et al. now matches their abstract.
+- Descriptions of Liu et al. (LAHIS), Tang et al., and Wendler et al. now match
+  their abstracts. The unsupported claim that Baek et al. studied English text
+  only is replaced by what their paper describes (passkey and
+  needle-in-a-haystack tasks rendered as images, on Qwen2-VL and InternVL2).
+- The LAHIS paper defines its score as E[|m * dL/dm| * 1(dL/dm < 0)]. The paper
+  now describes the pipeline's score, |dL/dm| at m = 1 without the
+  negative-gradient restriction, as a simplified variant of LAHIS.
+
+## For the author to verify
+
+- Confirm that `stage5_lahis.py` computes |dL/dm| without the
+  negative-gradient indicator, as Section 3.2 now states.
+- The paper source, with your name and email in `\author`, is in the
+  `vidixha/Artify2` repository. The compiled PDF is anonymous. If the repository
+  is public, consider making it private during double-blind review.
 
 Model details (layers, heads, encoder sizes) and all results come from the
 author's draft and code-verified answers.
