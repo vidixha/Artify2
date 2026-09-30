@@ -1,47 +1,47 @@
 # TMLR draft: status
 
-`main.tex` is the author's draft reframed as an investigative report, modeled on
-arXiv:2607.16693. It includes both rounds of the author's code-verified answers
-and has no `\authornote`s left.
+`main.tex` is the author's paper reframed as an investigative report (modeled on
+arXiv:2607.16693). It is written to the author's conference-paper editing rules
+(`rules.md`): short active sentences, no mid-sentence colons, semicolons, or em
+dashes, takeaway captions, and numbers in tables rather than prose.
 
-## Current claims
+## Grounding
 
-- **RQ1 (text vs. image heads):** differs by model. A layer-level view (Fig. 5,
-  Table 5) shows where each model's top heads sit.
-- **RQ2 (ablation):** zero-ablating the top-20 heads for either language
-  destroys generation in all four models (at most 1% fluent, against 71-76% for
-  random heads). The heads are necessary for coherent output, but the ablation
-  cannot show they route language. The script-change rates counted the collapse
-  as a change of script; they are kept in Appendix E with that explanation.
-- **Exploratory (cross-model):** per-language shared positions (Table 2). The
-  Qwen pair's 13/16/15 are about what layer placement predicts (about 11/15/15).
-  The union-based "18 of 20" and its wrong Jaccard (18/22) are gone.
-- **Probes:** data (127 es-en + 173 hi-en images) and the patch-level CV
-  leakage are disclosed.
-- **Data:** the unused 118 natural sentences are removed from Section 3.
+Every reference was checked against arXiv, publisher, or proceedings pages.
+Changes from earlier drafts:
+
+- InternVL3-2B now cites its own report (arXiv:2504.10479), which lists
+  InternViT-300M-448px-V2.5 and Qwen2.5-1.5B.
+- The Bangor Miami citation is now Deuchar et al. (2014), "Building bilingual
+  corpora" (DOI 10.21832/9781783091713-008). The earlier 2013 "Bangor
+  autoglosser" entry could not be found and was removed.
+- FLORES-200 now cites the NLLB Team (arXiv:2207.04672).
+- Venues were added from arXiv comments and proceedings: Baek (EMNLP 2025), Ye
+  (ACL 2025), Nie (Findings of EMNLP 2025), Tang (ACL 2024), Zhai (ICCV 2023),
+  Pix2Struct (ICML 2023, PMLR 202), Materzynska (CVPR 2022), Gandelsman
+  (ICLR 2024), Basu (NeurIPS 2024), Neo (ICLR 2025). SmolVLM's year is
+  corrected to 2025.
+- The earlier claim that Qwen2.5 was trained from scratch is removed. The
+  Qwen2.5 report states only that pretraining data grew from 7T to 18T tokens.
+  It does not say whether Qwen2.5 was initialized from Qwen2.
+- The description of Materzynska et al. now matches their abstract.
+
+Model details (layers, heads, encoder sizes) and all results come from the
+author's draft and code-verified answers.
 
 ## Experiments that would most strengthen the paper
 
-1. A layer-matched random control for the ablation (the Qwen top-20 heads are
-   19-20 of the 24 heads in layers 0-1).
-2. Head sets contrasted between languages (Hindi score minus English score)
-   instead of absolute top-20 sets.
+1. A random control drawn from the same layers as the top heads.
+2. Head sets contrasted between languages instead of absolute top-20 sets.
 3. A proper fluency measure (e.g. character error rate against the rendered
-   sentence), and counting a script change only when the output is fluent.
-4. Rerunning the script probes with folds grouped by image (GroupKFold).
-5. A collapse check on the Spanish-English ablation (Table 9).
-
-## Verify before submitting
-
-- The eight new bib entries (authors, venues). They were added from memory.
-- The Qwen2.5 report (arXiv:2412.15115): check that Qwen2.5 was not
-  initialized from Qwen2 weights.
+   sentence), with a script change counted only for fluent output.
+4. Script probes with folds grouped by image (GroupKFold).
+5. A collapse check on the Spanish-English ablation.
 
 ## Before camera-ready
 
 - Switch to `\usepackage[accepted]{tmlr}` and fill in `\month`, `\year` and
   `\openreview`.
-- `deuchar2013bangor` has no publisher.
 
 ## Figures
 
