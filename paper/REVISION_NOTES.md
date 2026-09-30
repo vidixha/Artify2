@@ -1,47 +1,42 @@
-# TMLR draft: open issues
+# TMLR draft: status
 
-`main.tex` is the author's draft typeset verbatim in the TMLR template
-(anonymous submission mode). The text was not edited. These issues were found
-while typesetting and are left for the author to decide.
+`main.tex` is the author's draft reframed as an investigative report, modeled on
+arXiv:2607.16693. The title is a question, there are two research questions plus
+one exploratory question, results are reported per model, and Section 7 is a
+table giving the strength of evidence for each observation. All data, tables and
+figures are unchanged.
 
-## Numbers that contradict each other
+## Resolved by the reframing
 
-- **PaliGemma random-head control:** Table 3 gives 31%, and the "3.1x control"
-  claim depends on it. Table 6 (seeds) gives 7.0 ± 2.8.
-- **InternVL3-2B Hindi ablation:** in Table 6, hi-zero (11.7 ± 1.2) is *below*
-  the random control (14.0 ± 6.2). This contradicts three claims: the abstract
-  and Section 6.4 ("well above a random-head control in every model"), and
-  Appendix C ("direction of every zero-ablation effect is preserved").
-- **PaliGemma en-zero:** 18% is below its own 31% control (Table 3). This does
-  not fit the claim that zero-ablation clears the control in every case.
-- **Intro, "1.6 to 8.2x a random-head control":** the 1.6x is InternVL's 14/9.
-  The seed data puts that ratio below 1.
+- **InternVL3-2B ablation:** reported as "no distinguishable effect" across seeds
+  (11.7 ± 1.2 vs. 14.0 ± 6.2 control). It is no longer claimed as an effect "in
+  every model", and the overlap-vs-ablation mismatch is discussed with two
+  candidate explanations (T54u #3, KDop).
+- **Cross-model head positions:** moved to an exploratory subsection. It now
+  states that head numbering is not comparable across independently trained
+  models (otTP #1) and suggests a layer-level comparison instead.
+- **What LAHIS measures:** new paragraph in Section 5.2 (T54u #1).
+- **What the script-flip metric measures:** new paragraph in Section 5.5
+  (T54u comment 3).
+- **CLIP related work:** Materzyńska et al. 2022 and Gandelsman et al. 2024 are
+  now cited (KDop).
+- **Stale text:** "We previously attributed this..." removed. "Other two models"
+  fixed. The "1.6 to 8.2x" range dropped from the intro.
 
-## Reviewer points not yet addressed
+## Still needs the author (red `[Author: ...]` notes in the PDF)
 
-- **LAHIS scoring data (otTP #3, T54u #2):** still not stated whether the 100
-  scoring sentences per language are code-switched or monolingual, and what
-  en/es/hi means in Table 2.
-- **Ablation vs. overlap (T54u #3, KDop):** InternVL3-2B has the most unified
-  routing but the weakest ablation effect. This is still not discussed.
-- **Comparing head indices across independently trained models (otTP #1):**
-  RQ2 is still framed as "the more important result", and the argument that
-  heads within a layer are permutation-invariant is not answered.
-- **LAHIS specificity (T54u #1):** LAHIS scores general loss importance, not
-  language identity specifically.
-- **Missing related work (KDop):** VLM text-readability work, CLIP spelling
-  vs. scene disentanglement (Materzyńska et al.; Gandelsman et al.), and work
-  on where OCR information enters the decoder.
+1. **Section 3:** state whether the LAHIS sentences are monolingual or
+   code-switched (otTP #3, T54u #2).
+2. **Section 6.3:** PaliGemma random control is 31% in Table 3 but 7.0 ± 2.8 in
+   Table 7. Say which is right.
+3. **Section 6.4:** was Qwen2.5 initialized from Qwen2? Consider a
+   within-layer head-shuffle control for the cross-model overlap.
+4. **Section 2:** add the remaining related work KDop asked for (rendered-text
+   readability in VLMs; where OCR information enters the decoder).
+5. **Appendix C:** the three 100-sentence seed sets are drawn from 118 sentences,
+   so they overlap. Say so.
 
-## Stale or anonymity-breaking text
-
-- **Section 6.4, "We previously attributed this...":** refers to the earlier
-  submission. Remove it for double-blind review.
-- **Section 6.2, "than the other two models":** there are four models now.
-- **Section 6.4, "than the other two models (37/100 against 5/100 and 11/100)":**
-  PaliGemma's baseline is missing.
-- **Appendix C, "independent random 100-sentence set":** each set is drawn
-  from the 118 held-out sentences, so the three sets overlap heavily.
+Remove every `\authornote` before submitting.
 
 ## Before camera-ready
 
