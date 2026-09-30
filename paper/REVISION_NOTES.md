@@ -1,7 +1,10 @@
 # TMLR draft: status
 
-`main.tex` is the author's paper reframed as an investigative report (modeled on
-arXiv:2607.16693). It is written to the author's conference-paper editing rules
+`main.tex` follows the framing and structure of arXiv:2607.16693: a question
+title, a page-1 teaser figure, two research questions, Background and
+Experimental Setup sections, "Label: finding" result headings, and a
+Limitations section after the Conclusion. The prose follows the author's
+conference-paper editing rules
 (`rules.md`): short active sentences, no mid-sentence colons, semicolons, or em
 dashes, takeaway captions, and numbers in tables rather than prose.
 

@@ -19,7 +19,7 @@
 \newcommand{\AcapC}{A{\cap}C}
 \newcommand{\BcapC}{B{\cap}C}
 
-\title{Do Small Vision-Language Models Route Language the Same Way in Pixels and in Tokens? A Mechanistic Investigation with Code-Switched Text}
+\title{Are Language Heads Modality-Invariant? A Mechanistic Analysis of Text and Rendered Code-Switched Input in Small Vision-Language Models}
 
 \author{\name Akshata \email akshatavidisha@gmail.com}
 
@@ -33,113 +33,144 @@
 
 % ============================================================
 \begin{abstract}
-Vision-language models (VLMs) often read text from images, including code-switched text such as a screenshot of a Hinglish tweet. It is unknown whether the attention heads that matter for a language when it arrives as text tokens also matter when it arrives as a rendered image. We study this question in four open VLMs with at most 3B parameters. We score every attention head with gradient-based head importance (LAHIS) on monolingual English, Spanish, and Hindi sentences. Each sentence is given as text, as a rendered image with a query, and as a rendered image alone. We also probe the vision encoders for script identity and ablate the top heads while the models read Hindi-English code-switched images. The answer depends on the model. Qwen2-VL-2B and SmolVLM use largely different heads for text and image input. InternVL3-2B uses nearly the same heads, but only for Hindi. For PaliGemma-3B, the overlap measure cannot separate either pattern from chance. All four vision encoders encode script identity from their first layer. Zero-ablating the top 20 heads for either language destroys generation in every model, while ablating 20 random heads does not. The top heads are therefore necessary for coherent output, but the ablation does not show that they route language. A script-change metric counts this collapse as a change of script, so head-ablation studies need a check on output quality. We release the pipeline, the corpus, and the per-head scores.
+Vision-language models (VLMs) increasingly read text directly from images, including code-switched text that mixes two languages and two scripts. Whether a VLM processes a language with the same internal components when it arrives as text tokens or as a rendered image remains unknown. Recent mechanistic interpretability studies show that a small set of attention heads in multilingual language models matters most for language processing, but these studies consider text input only. We investigate whether such language-important heads are modality-invariant in four open VLMs with at most 3B parameters. For English, Spanish, and Hindi, we score every decoder head with gradient-based head importance when the same sentence is given as text, as a rendered image with a query, and as a rendered image alone. Head sharing depends on the model. Qwen2-VL-2B and SmolVLM recruit largely separate heads for text and image input, InternVL3-2B recruits nearly the same heads for Hindi only, and the measure is inconclusive for PaliGemma-3B. Linear probes show that all four vision encoders encode script identity from their first layer. Ablating the top heads while the models read Hindi-English code-switched images destroys generation in every model, while ablating random heads does not, indicating that these heads are necessary for coherent output. Heads of either language cause the same collapse, so the ablation does not isolate a role in language routing, and a script-change metric misreads the collapse as a change of language. Finally, head positions shared across models are largely explained by where each model places its top heads.
 \end{abstract}
 
 % ============================================================
 \section{Introduction}
 \label{sec:intro}
 
-VLMs read text from images such as screenshots, photographed notes, and scanned documents. This text is often code-switched, which means it alternates between two languages within one sentence. A VLM must then identify both languages from pixels, without the token boundaries that a text-only model receives.
+Vision-language models (VLMs) increasingly read text directly from pixels. Models now process rendered text as images \citep{rust2023pixel, tschannen2023clippo}, parse documents and screenshots without a separate OCR step \citep{kim2022donut, lee2023pix2struct}, and rely on specialized attention heads to read text embedded in images \citep{baek2025ocr}. Much of this text is not in a single language. Screenshots of social media posts and chat messages can contain code-switched text, which alternates between two languages within one sentence. A VLM must then identify both languages from pixels, without the token boundaries that a text-only model receives.
 
-A VLM passes an image through a vision encoder and sends the resulting tokens to a language decoder. The same decoder also reads text tokens directly. Mechanistic studies have located the attention heads and neurons that matter for language processing in text-only models \citep{liu2026lahis, tang2024neurons}. Studies of VLMs have located heads that read text in images, but only for English \citep{baek2025ocr}. It is unknown whether the decoder relies on the same heads for a language when it reads that language as text tokens and as image tokens.
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+    font=\small,
+    panel/.style={draw, rounded corners=2pt, minimum width=4.4cm, minimum height=2.6cm, anchor=north},
+    img/.style={draw=gray!70, fill=white, inner sep=5pt, font=\sffamily},
+    arr/.style={-{Stealth[length=2mm]}, gray!70!black},
+]
+\node[panel, draw=blue!70!black] (pa) at (0,0) {};
+\node[panel, draw=red!70!black] (pb) at (4.8,0) {};
+\node[panel, draw=green!50!black] (pc) at (9.6,0) {};
+\node[anchor=north, text=blue!70!black, font=\small\bfseries] at ($(pa.north)+(0,-0.12)$) {A\quad Text};
+\node[anchor=north, text=red!70!black, font=\small\bfseries] at ($(pb.north)+(0,-0.12)$) {B\quad Image + query};
+\node[anchor=north, text=green!50!black, font=\small\bfseries] at ($(pc.north)+(0,-0.12)$) {C\quad Image only};
 
-The answer determines whether findings about language heads in text models transfer to visual input. If both input paths use the same heads, text-only findings apply to images. If they use different heads, the visual path needs its own analysis.
+\node[font=\footnotesize\sffamily] at ($(pa.north)+(0,-1.05)$) {\setlength{\fboxsep}{1.5pt}\fbox{The}\,\fbox{museum}\,\fbox{opens}\,\fbox{at}\,\fbox{nine}};
+\node[font=\footnotesize, text=gray!60!black] at ($(pa.north)+(0,-1.85)$) {text tokens $\rightarrow$ decoder};
 
-We compare the two paths with three input conditions. Each sentence is given as text (condition A), as a rendered image with a fixed query (condition B), and as a rendered image alone (condition C). Comparing A with C isolates the input modality. Comparing B with C isolates the effect of the query. We score every attention head in each condition with LAHIS \citep{liu2026lahis} and study four open VLMs from three decoder families. We ask two research questions and one exploratory question:
+\node[img] (ib) at ($(pb.north)+(0,-1.0)$) {The museum opens at nine};
+\node[font=\footnotesize] at ($(pb.north)+(0,-1.6)$) {query: ``Read this:''};
+\node[font=\footnotesize, text=gray!60!black] at ($(pb.north)+(0,-2.1)$) {image tokens $\rightarrow$ decoder};
 
+\node[img] (ic) at ($(pc.north)+(0,-1.0)$) {The museum opens at nine};
+\node[font=\footnotesize] at ($(pc.north)+(0,-1.6)$) {query: (empty)};
+\node[font=\footnotesize, text=gray!60!black] at ($(pc.north)+(0,-2.1)$) {image tokens $\rightarrow$ decoder};
+
+\node[draw, rounded corners=2pt, fill=orange!12, draw=orange!70!black, align=center, font=\small] (dec) at ($(pb.south)+(0,-0.95)$) {Same decoder heads? Top-20 heads by LAHIS importance, compared across A, B, and C};
+\draw[arr] (pa.south) -- (dec.north);
+\draw[arr] (pb.south) -- (dec.north);
+\draw[arr] (pc.south) -- (dec.north);
+\end{tikzpicture}
+\caption{The three input conditions used in our experiments. Each condition presents the same sentence to the same decoder, as text tokens (A), as a rendered image with a query (B), or as a rendered image alone (C). We score every decoder head in each condition and compare the top heads. The sentence is illustrative.}
+\label{fig:teaser}
+\end{figure}
+
+How VLMs internally identify and process languages that arrive as pixels is therefore an open question for interpretability. Recent mechanistic interpretability studies have begun identifying the components responsible for language processing in large language models (LLMs). In particular, \citet{liu2026lahis} show that a small set of attention heads matters far more than the rest for language identification, and \citet{tang2024neurons} find neurons whose deactivation degrades only one language. While these findings provide evidence that language processing is localized, they are derived almost exclusively from text input. Consequently, it remains unclear whether the same heads process a language when it reaches the decoder as image tokens rather than text tokens.
+
+This question matters for how far text-only interpretability findings transfer to VLMs. A VLM passes an image through a vision encoder and sends the resulting tokens to a language decoder, which also reads text tokens directly. If both input paths rely on the same heads, findings from text-only models apply to visual input. If they rely on different heads, the visual path requires its own analysis. Prior work on text in images does not answer this question. OCR heads have been studied for English text only \citep{baek2025ocr}, and cross-lingual attention in VLMs has been studied without separating the text path from the image path \citep{ye2025claim}.
+
+Motivated by this gap, we investigate the following research questions:
 \begin{itemize}
-    \item \textbf{RQ1.} When the same sentence reaches a VLM as text tokens and as a rendered image, does the model rely on the same attention heads?
-    \item \textbf{RQ2.} When a VLM reads code-switched text from an image, does ablating the top heads change the language of its output more than ablating random heads?
-    \item \textbf{Exploratory.} Do the positions of the top heads match across models that share a decoder family?
+    \item \textbf{RQ1: Are language-important heads modality-invariant?} Does the same sentence recruit the same decoder attention heads when a VLM receives it as text tokens and as a rendered image?
+    \item \textbf{RQ2: Are these heads causally involved in language routing?} When a VLM reads code-switched text from an image, does ablating the top heads change the language of its output beyond what ablating random heads does?
 \end{itemize}
 
-We first test a precondition. The vision encoder must represent script identity (Latin or Devanagari) for the image path to route language by script.
-
-Following \citet{liu2026lahis}, we identify heads on monolingual sentences. Code-switched text enters the study in two places. The script probes read mixed-script images, and the ablation test in RQ2 removes the identified heads while the model reads code-switched images.
-
-We find the following:
-\begin{itemize}
-    \item \textbf{Script identity is available early.} All four vision encoders separate Latin from Devanagari script from their first layer (Section~\ref{sec:probes}).
-    \item \textbf{Head sharing depends on the model.} Two models use largely separate heads for text and image input, one shares them for Hindi only, and one is inconclusive. Where the sets differ, the text heads concentrate in the first two decoder layers and the image heads do not (Section~\ref{sec:overlap}).
-    \item \textbf{The top heads are necessary but not shown to route language.} Zero-ablating them destroys generation in all four models, while random heads do not. The ablation cannot isolate a role in routing language (Section~\ref{sec:ablation}).
-    \item \textbf{Shared positions across models match layer placement.} The two Qwen-family models share about as many head positions as their layer placement predicts (Section~\ref{sec:lineage}).
-\end{itemize}
-
-We study four small VLMs, two language pairs, and one attribution method. We report results per model and rate the evidence for each observation (Section~\ref{sec:conclusions_table}). We make no claim that the patterns hold for other VLMs.
+To answer these questions, we present each sentence in three input conditions (Figure~\ref{fig:teaser}) and score every decoder head with LAHIS \citep{liu2026lahis} in four open VLMs from three decoder families. We further probe the vision encoders for script identity and ablate the top heads while the models read Hindi-English code-switched images. Code and data for reproducing our experiments will be released with the paper.
 
 % ============================================================
 \section{Related Work}
 \label{sec:related}
 
-\paragraph{Language heads and neurons in text LLMs.}
-\citet{liu2026lahis} introduce LAHIS, which scores attention heads with one forward and one backward pass through a differentiable head mask. They find that a small set of heads matters most for language identification in multilingual LLMs. \citet{tang2024neurons} identify language-specific neurons by contrasting activations on parallel corpora. Deactivating these neurons degrades only the corresponding language. \citet{wendler2024llamas} show that intermediate representations of Llama-2 are closer to English than to the input or output language. All of this work studies text input only.
+\subsection{Mechanistic Interpretability of Language Processing}
 
-\paragraph{Language confusion and code-switching.}
-\citet{nie2025confusion} trace language-confusion errors in English-centric LLMs to specific token positions and late-layer transitions. We know of no mechanistic study of code-switching itself, and of none that covers visual input.
+Mechanistic interpretability has located several components that language models use to process multiple languages. \citet{liu2026lahis} introduce Language Attention Head Importance Scores (LAHIS), which rank attention heads with one forward and one backward pass through a differentiable head mask. They find that a small set of heads matters most for language identification in multilingual LLMs. \citet{tang2024neurons} identify language-specific neurons by contrasting activations on parallel corpora and show that deactivating them degrades only the corresponding language. \citet{wendler2024llamas} show that intermediate representations of Llama-2 are closer to English than to the input or output language. \citet{nie2025confusion} trace language-confusion errors in English-centric LLMs to specific token positions and late-layer transitions. All of these studies consider text input only, and none studies code-switching directly.
 
-\paragraph{Language heads in VLMs.}
-\citet{ye2025claim} identify cross-lingual attention misalignment in VLMs and intervene on it to reduce multilingual object hallucination. They study monolingual queries in several languages and do not separate the text path from the image path. \citet{baek2025ocr} identify OCR heads that read text in images, but only for English text.
+\subsection{Mechanistic Interpretability of Vision-Language Models}
 
-\paragraph{Reading text from pixels.}
-Several models process rendered text directly as pixels \citep{rust2023pixel, tschannen2023clippo} or read documents and screenshots without an OCR step \citep{kim2022donut, lee2023pix2struct}. CLIP's image encoder matches images of words with images of the scenes they describe, and its spelling ability can be isolated in a separate subspace \citep{materzynska2022disentangling}. Many attention heads in CLIP's image encoder have property-specific roles, such as location or shape \citep{gandelsman2024interpreting}. Our script probes test a narrower property, script identity, in the vision encoders of VLMs.
+Recent work has begun to trace how image information moves through the language model of a VLM. \citet{palit2023towards} adapt causal tracing to BLIP, and \citet{basu2024understanding} extend causal information tracing to multimodal LLMs to locate where visual information is stored and transferred. \citet{neo2025towards} track how visual token representations change across the layers of LLaVA's language model. Closer to our setting, \citet{ye2025claim} identify cross-lingual attention misalignment in VLMs and intervene on it to reduce multilingual object hallucination. They study monolingual queries in several languages and do not separate the text path from the image path. \citet{baek2025ocr} identify OCR heads that read text in images, but only for English text.
 
-\paragraph{Visual information in the decoder.}
-Causal tracing has been adapted to VLMs to locate where image information is stored and transferred \citep{palit2023towards, basu2024understanding}. \citet{neo2025towards} track how visual token representations change across the layers of LLaVA's language model. None of these studies compares the heads used for the same content as text and as an image.
+\subsection{Reading Text from Pixels}
 
-\paragraph{Gap.}
-No prior work compares, head by head, which heads a VLM relies on for the same sentence as text and as a rendered image. Our design also separates the effect of the query from the effect of modality.
+Several models process rendered text as pixels \citep{rust2023pixel, tschannen2023clippo} or read documents and screenshots without an OCR step \citep{kim2022donut, lee2023pix2struct}. Within CLIP, the image encoder matches images of words with images of the scenes they describe, and its spelling ability can be isolated in a separate subspace \citep{materzynska2022disentangling}. Many attention heads in CLIP's image encoder also have property-specific roles, such as location or shape \citep{gandelsman2024interpreting}.
+
+Building upon this line of work, we investigate whether the attention heads that matter for a language in a VLM's decoder are the same when the language arrives as text and as a rendered image. Specifically, we score every decoder head in both input paths, probe the vision encoder for script identity, and test the top heads with ablation on code-switched images.
 
 % ============================================================
-\section{Data}
-\label{sec:data}
+\section{Background}
+\label{sec:background}
 
-All code-switched text is real and human-produced, with gold token-level language labels. We do not use synthetic code-switching, because word substitution can produce sentences that bilingual speakers would not write.
+\subsection{Attention Heads in the Decoder}
 
-The Hindi-English data are the Devanagari-script Twitter portion of the GLUECoS part-of-speech corpus \citep{khanuja2020gluecos}. The Spanish-English data are the code-switched sentences of the Bangor Miami corpus of transcribed speech \citep{deuchar2014building}. Monolingual English, Spanish, and Hindi sentences come from FLORES-200 \citep{nllb2022}.
+Each decoder layer $\ell$ contains a multi-head self-attention module with $H$ heads. Head $h$ produces an output $\mathbf{z}_{\ell,h} \in \mathbb{R}^{d_h}$ at every token position. The module concatenates the head outputs and applies an output projection $\mathbf{W}^{O}_{\ell}$,
+\begin{equation}
+    \mathrm{MHA}_{\ell}(\mathbf{x}) = \mathbf{W}^{O}_{\ell} \left[ \mathbf{z}_{\ell,1}; \dots; \mathbf{z}_{\ell,H} \right].
+\end{equation}
+Because the head outputs are still separate at the input of $\mathbf{W}^{O}_{\ell}$, each head's contribution can be scaled or removed exactly at this point. In a VLM, the decoder applies the same heads to text tokens and to the image tokens produced by the vision encoder and its connector.
 
-\paragraph{Cleaning.}
-We apply Penn Treebank detokenization and filters for script consistency and noise. A two-stage fluency filter first applies heuristic checks and then removes the quartile with the highest Qwen2.5-0.5B perplexity in each language pair. A content filter removes profanity and political material, judged by Claude against a fixed rubric. We record the reason for every removed sentence. The final corpus has 806 Hindi-English sentences from the GLUECoS training and development splits, 127 Spanish-English sentences, 750 monolingual sentences (250 per language), and 100 transliteration controls. The controls are Hindi sentences written in Latin script, so they separate script from language.
+\subsection{Language Attention Head Importance}
 
-\paragraph{Data for each analysis.}
-\begin{itemize}
-    \item \textbf{Head importance (RQ1).} For each language, 100 of the 250 monolingual FLORES-200 sentences. Conditions B and C use rendered images of the same sentences. No code-switched text is used to identify heads.
-    \item \textbf{Script probes.} The first 300 rendered code-switched images, 127 Spanish-English and 173 Hindi-English. All Devanagari patches therefore come from the Hindi-English images.
-    \item \textbf{Hindi-English ablation (RQ2).} 100 sentences sampled from the 806 Hindi-English sentences. These are disjoint from the sentences used to identify heads.
-    \item \textbf{Spanish-English ablation.} The first 100 of the 127 Spanish-English sentences.
-\end{itemize}
-
-\paragraph{Rendering.}
-Each sentence is kept as raw text and rendered as black text on a white image. Each token is drawn in a font for its script, Noto Sans for Latin and Noto Sans Devanagari for Devanagari. We record a bounding box for every token, which gives each image patch a script label. Figure~\ref{fig:stimuli} shows examples.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.85\linewidth]{figures/sample_stimuli.png}
-\caption{Hindi-English stimuli mix Devanagari and Latin script within one image, while Spanish-English stimuli use Latin script only. The four sentences are rendered as the models receive them, without a prompt.}
-\label{fig:stimuli}
-\end{figure}
+LAHIS \citep{liu2026lahis} attaches a mask value $M_{\ell,h}$ to each head and scales its output,
+\begin{equation}
+    \mathrm{MHA}_{\ell}(\mathbf{x}; \mathbf{M}) = \mathbf{W}^{O}_{\ell} \left[ M_{\ell,1}\,\mathbf{z}_{\ell,1}; \dots; M_{\ell,H}\,\mathbf{z}_{\ell,H} \right],
+\end{equation}
+with all $M_{\ell,h}$ initialized to one. The importance of head $h$ in layer $\ell$ is the magnitude of the gradient of the language-modeling loss $\mathcal{L}$ with respect to its mask,
+\begin{equation}
+    I_{\ell,h} = \left| \frac{\partial \mathcal{L}}{\partial M_{\ell,h}} \right|_{\mathbf{M}=\mathbf{1}},
+\end{equation}
+averaged over a set of sentences in one language. The loss is the standard next-token loss and does not target language identity. A head therefore scores high if masking it hurts prediction of text in that language, which includes heads with language-general functions.
 
 % ============================================================
-\section{Models}
-\label{sec:models}
+\section{Experimental Setup}
+\label{sec:setup}
 
-We study four open VLMs that differ in vision encoder, decoder family, and image-token compression. Each has at most 3B parameters, which keeps gradient attribution over every head within our compute budget.
+We conduct all experiments on four open VLMs with at most 3B parameters, chosen to differ in vision encoder, decoder family, and image-token compression. The model size keeps gradient attribution over every head within our compute budget.
 
 \begin{itemize}
     \item \textbf{Qwen2-VL-2B-Instruct} \citep{wang2024qwen2vl} pairs a custom 2D-RoPE vision transformer (0.67B) and a $2{\times}2$ patch merger with a Qwen2-1.5B decoder (28 layers, 12 heads per layer).
     \item \textbf{InternVL3-2B} \citep{zhu2025internvl3} pairs InternViT-300M-448px-V2.5 and pixel-shuffle compression with a Qwen2.5-1.5B decoder (28 layers, 12 heads per layer).
     \item \textbf{SmolVLM-Instruct} \citep{marafioti2025smolvlm} pairs a SigLIP-SO400M encoder \citep{zhai2023sigmoid} and a pixel-shuffle connector with a SmolLM2-1.7B decoder (24 layers, 32 heads per layer).
-    \item \textbf{PaliGemma-3B (mix-448)} \citep{beyer2024paligemma} pairs a SigLIP-SO400M encoder at 448 pixels and a linear projector with a Gemma-2B decoder (18 layers, 8 heads per layer, multi-query attention). The projector keeps all 1,024 image tokens. PaliGemma-3B is a prefix language model, so we score its decoder on the text after the prefix \texttt{[BOS]\,\textbackslash n}.
+    \item \textbf{PaliGemma-3B (mix-448)} \citep{beyer2024paligemma} pairs a SigLIP-SO400M encoder at 448 pixels and a linear projector that keeps all 1,024 image tokens with a Gemma-2B decoder (18 layers, 8 heads per layer, multi-query attention). PaliGemma-3B is a prefix language model, so we score its decoder on the text after the prefix \texttt{[BOS]\,\textbackslash n}.
 \end{itemize}
 
-Qwen2-VL-2B and InternVL3-2B use decoders from the same family. Qwen2.5 was pretrained on 18 trillion tokens, against 7 trillion for Qwen2 \citep{qwen2024qwen25}. The Qwen2.5 report does not state whether Qwen2.5 was initialized from Qwen2 weights. SmolVLM uses a Llama-architecture SmolLM2 decoder, and PaliGemma-3B uses a Gemma decoder. Both come from separate pretraining lineages.
+Qwen2-VL-2B and InternVL3-2B use decoders from the same family. Qwen2.5 was pretrained on 18 trillion tokens, against 7 trillion for Qwen2 \citep{qwen2024qwen25}. The Qwen2.5 report does not state whether Qwen2.5 was initialized from Qwen2 weights. SmolVLM uses a Llama-architecture SmolLM2 decoder, and PaliGemma-3B uses a Gemma decoder, each from a separate pretraining lineage.
 
-\paragraph{Language competence.}
-We check that each extracted decoder models each language before we score heads, so that the scores do not reflect noise. Table~\ref{tab:competence} reports decoder perplexity on monolingual FLORES-200 text. Per-token perplexity cannot be compared across languages. Tokenizer fertility differs by 3.4 to 3.6 times between English and Devanagari Hindi, which lowers Hindi's per-token perplexity regardless of competence. We therefore normalize by characters, $\mathrm{ppl}_c = \exp(\mathrm{NLL}/n_{\mathrm{chars}})$, and use this value for all cross-language comparisons. All models stay below a per-token threshold of 100 except PaliGemma-3B on Spanish (114.7). We keep PaliGemma-3B because its character-normalized Spanish perplexity lies within the range of the other models.
+\paragraph{Input Conditions.}
+Following Figure~\ref{fig:teaser}, we present each sentence in three conditions. In condition A (text), the decoder reads the raw sentence and the vision encoder does not run. In condition B (image+query), the full VLM reads the rendered sentence with the fixed query ``Read this:'' and the loss is computed on the sentence as the target. Condition C (image-only) is identical to B except that the query is empty. Comparing B with C isolates the effect of the query, and comparing A with C isolates the effect of modality. Condition A uses the decoder taken from inside the VLM after vision-language training, not the original pretrained checkpoint. This keeps the comparison between A and C free of differences caused by vision-language training.
+
+\paragraph{Dataset Construction.}
+All code-switched text is real and human-produced, with gold token-level language labels. Hindi-English sentences come from the Devanagari-script Twitter portion of the GLUECoS part-of-speech corpus \citep{khanuja2020gluecos}. Spanish-English sentences come from the code-switched portion of the Bangor Miami corpus of transcribed speech \citep{deuchar2014building}. Monolingual English, Spanish, and Hindi sentences come from FLORES-200 \citep{nllb2022}. We apply Penn Treebank detokenization, filters for script consistency and noise, and a two-stage fluency filter that first applies heuristic checks and then removes the quartile with the highest Qwen2.5-0.5B perplexity in each language pair. A content filter removes profanity and political material, judged by Claude against a fixed rubric. The final corpus contains 806 Hindi-English sentences from the GLUECoS training and development splits, 127 Spanish-English sentences, 750 monolingual sentences (250 per language), and 100 transliteration controls, which are Hindi sentences written in Latin script.
+
+Every sentence is kept as raw text and rendered as black text on a white image, with each token drawn in a font for its script (Noto Sans for Latin and Noto Sans Devanagari for Devanagari). We record a bounding box for every token, which gives each image patch a script label. Figure~\ref{fig:stimuli} shows examples.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.82\linewidth]{figures/sample_stimuli.png}
+\caption{Rendered code-switched stimuli. Hindi-English sentences mix Devanagari and Latin script within one image, while Spanish-English sentences use Latin script only. Images are shown as the models receive them, without a prompt.}
+\label{fig:stimuli}
+\end{figure}
+
+We use the data as follows. Head importance uses 100 of the 250 monolingual FLORES-200 sentences per language, with rendered images of the same sentences in conditions B and C. No code-switched text is used to identify heads. The script probes use the first 300 rendered code-switched images, of which 127 are Spanish-English and 173 are Hindi-English. The Hindi-English ablation uses 100 sentences sampled from the 806 Hindi-English sentences, and the Spanish-English ablation uses the first 100 of the 127 Spanish-English sentences.
+
+\subsection{Language Competence}
+\label{sec:competence}
+
+Before scoring heads, we verify that each extracted decoder models each language, so that the scores do not reflect noise. Table~\ref{tab:competence} reports decoder perplexity on monolingual FLORES-200 text. Per-token perplexity cannot be compared across languages, because tokenizer fertility differs by 3.4 to 3.6 times between English and Devanagari Hindi and lowers Hindi's per-token perplexity regardless of competence. We therefore normalize by characters, $\mathrm{ppl}_c = \exp(\mathrm{NLL}/n_{\mathrm{chars}})$, and use this value for all cross-language comparisons. All models stay below a per-token threshold of 100 except PaliGemma-3B on Spanish (114.7). We retain PaliGemma-3B because its character-normalized Spanish perplexity lies within the range of the other models.
 
 \begin{table}[t]
 \centering
-\caption{Every decoder models all three languages, and Hindi is the hardest language for every model on the character-normalized scale. Per-token perplexity is lower for Hindi because of tokenizer fertility and is not comparable across languages. PaliGemma-3B is scored as a prefix language model.}
+\caption{Language competence of the extracted decoders on monolingual FLORES-200 text. Per-token perplexity is lower for Hindi because of tokenizer fertility and is not comparable across languages. Character-normalized perplexity shows that every decoder models all three languages, with Hindi the hardest for every model.}
 \label{tab:competence}
 \begin{tabular}{l ccc c ccc}
 \toprule
@@ -155,11 +186,10 @@ PaliGemma-3B & 91.3 & 114.7 & 69.4 && 2.48 & 2.75 & 4.48 \\
 \end{tabular}
 \end{table}
 
-% ============================================================
-\section{Method}
-\label{sec:method}
+\subsection{Identifying Language-Important Heads}
+\label{sec:lahis}
 
-Figure~\ref{fig:pipeline} summarizes the pipeline.
+For each model, language, and condition, we compute the LAHIS importance of every decoder head (Section~\ref{sec:background}) and average it over the 100 monolingual sentences. We apply the mask at the input of each layer's attention output projection, where the head outputs are still separate. Appendix~\ref{app:lahis} shows the resulting layer-by-head maps. Figure~\ref{fig:pipeline} summarizes how these scores feed the remaining analyses.
 
 \begin{figure}[t]
 \centering
@@ -194,68 +224,48 @@ Figure~\ref{fig:pipeline} summarizes the pipeline.
 \draw[arr] (cs.south) -- (abl.north);
 \draw[arr] (cs.south) -- (probe.north);
 \end{tikzpicture}
-\caption{Head importance is scored on monolingual sentences in three input conditions and compared across conditions and models. Rendered code-switched sentences are used for the script probes and for the ablation test.}
+\caption{\textbf{Overview of the pipeline.} (Top) Each monolingual sentence is scored with LAHIS in three input conditions. (Bottom) The top heads are compared across conditions and models, and ablated while the model reads rendered code-switched sentences. The script probes use the same code-switched images.}
 \label{fig:pipeline}
 \end{figure}
 
-\subsection{Input conditions}
-\label{sec:conditions}
-
-Each sentence is scored in three conditions:
-\begin{description}
-    \item[A (text)] The decoder reads the raw sentence. The vision encoder does not run.
-    \item[B (image+query)] The full VLM reads the rendered sentence with the fixed query ``Read this:''. The loss is computed on the sentence as the target.
-    \item[C (image-only)] As in B, but the query is empty. The chat template and role tokens are identical to B.
-\end{description}
-
-Comparing B with C isolates the effect of the query. Comparing A with C isolates the effect of modality. Condition A uses the decoder taken from inside the VLM after vision-language training, not the original pretrained checkpoint. This keeps the comparison between A and C free of differences caused by vision-language training.
-
-\subsection{Head importance}
-\label{sec:lahis}
-
-Following \citet{liu2026lahis}, we multiply the output of each head $h$ in layer $\ell$ by a mask value $M_{\ell,h}$, initialized to one. We apply the mask at the input of each layer's attention output projection, where the head outputs are still separate. The importance of a head is $|\partial \mathcal{L} / \partial M_{\ell,h}|$, where $\mathcal{L}$ is the language-modeling loss over all tokens of a sentence. We average this score over 100 sentences per language and condition. Appendix~\ref{app:lahis} shows the resulting layer-by-head maps.
-
-\paragraph{What the score measures.}
-The LAHIS loss is the standard next-token loss and does not target language identity. A head scores high if masking it hurts prediction of text in the given language. This includes heads with general functions, such as tracking position or copying earlier tokens. A high score therefore marks a head as important for processing a language, including language-general heads. Section~\ref{sec:lineage} shows that most top heads are shared across the three languages.
-
-\subsection{Head overlap}
+\subsection{Head Overlap}
 \label{sec:overlap_method}
 
-For each model, language, and condition, we take the 20 highest-scoring heads and compute the Jaccard overlap between conditions. The chance level is the 95th percentile of the overlap between random 20-head sets, over 10{,}000 draws from each model's grid. We repeat the analysis for $K \in \{5, 10, 20, 40, 80\}$ heads. For the cross-model analysis, we count the (layer, head) positions that two models' text-condition sets share.
+For each model, language, and condition, we take the 20 highest-scoring heads and compute the Jaccard overlap between conditions. The chance level is the 95th percentile of the overlap between random 20-head sets, over 10{,}000 draws from each model's grid. We repeat the analysis for $K \in \{5, 10, 20, 40, 80\}$ heads. To compare models, we count the (layer, head) positions that two models' text-condition sets share.
 
-\subsection{Script probes}
+\subsection{Script Probes}
 \label{sec:probe_method}
 
-At every vision-encoder layer, we train a linear probe to predict whether an image patch shows Latin or Devanagari script. Patch labels come from the token bounding boxes, mapped onto the grid of image tokens that the decoder receives. This grid differs from the raw patch grid when a patch merger or pixel shuffle compresses the tokens. We exclude background patches, so chance accuracy is 0.5. We sample 100 patches per image and 4,000 text patches per layer. The probe is a class-balanced logistic regression, evaluated by balanced accuracy with stratified 5-fold cross-validation. The folds split patches, not images (Section~\ref{sec:limitations}).
+To test whether script identity is available before the decoder, we train a linear probe at every vision-encoder layer to predict whether an image patch shows Latin or Devanagari script. Patch labels come from the token bounding boxes, mapped onto the grid of image tokens that the decoder receives after any patch merger or pixel shuffle. We exclude background patches, so chance accuracy is 0.5. We sample 100 patches per image and 4,000 text patches per layer. Each probe is a class-balanced logistic regression, evaluated by balanced accuracy with stratified 5-fold cross-validation over patches.
 
-\subsection{Ablation}
+\subsection{Head Ablation}
 \label{sec:ablation_method}
 
-Gradient scores are correlational, so we test whether the top heads affect generation. We set the output of a head set to zero and generate from 100 Hindi-English code-switched images, with greedy decoding and a limit of 64 tokens. The ablated sets are the 20 highest-scoring text-condition heads for English and for Hindi. We call them English heads and Hindi heads after the language used to score them. The sets are not contrasted between languages, and they overlap heavily (Section~\ref{sec:lineage}).
+Gradient importance does not establish that a head affects generation. To test this, we set the output of a head set to zero and generate from 100 Hindi-English code-switched images, with greedy decoding and a limit of 64 tokens. The ablated sets are the 20 highest-scoring text-condition heads for English and for Hindi, which we call English heads and Hindi heads. These sets are not contrasted between languages. We compare against two controls. The random-head control ablates 20 heads drawn from outside both top-20 sets. Mean ablation replaces each head's output with its mean over token positions in the same image's un-ablated forward pass. We run the ablation once and then three more times with new seeds, each drawing its own 100 sentences and its own random heads.
 
-We use two controls. The random-head control ablates 20 heads drawn from outside both top-20 sets. Mean ablation replaces each head's output with its mean over token positions in the same image's un-ablated forward pass. We run the ablation once and then three more times with new seeds. Each seeded run draws its own 100 sentences and its own random heads.
-
-We measure two outcomes. The first is the script label of each output, which is Latin, Devanagari, other, or none for output without letters. A script change is any change of label from the un-ablated output. The second is fluency. An ablated output counts as fluent if it keeps at least half of the words of the un-ablated output for the same image. This proxy is coarse, so we compare it against the random-head control. Spanish-English uses one script, so for it we run a language identifier (\texttt{langid}) on the output instead.
+We measure two outcomes. The first is the script label of each output (Latin, Devanagari, other, or none for output without letters), where a script change is any change of label from the un-ablated output. The second is fluency. An ablated output counts as fluent if it keeps at least half of the words of the un-ablated output for the same image, and we read this coarse proxy against the random-head control. For Spanish-English, which uses one script, we run a language identifier (\texttt{langid}) on the output instead.
 
 % ============================================================
 \section{Results}
 \label{sec:results}
 
-\subsection{Script identity is decodable from the first layer of every vision encoder}
+We examine whether language-important heads are modality-invariant from four complementary perspectives. We first test whether the vision encoders make script identity available to the decoder. We then compare the top heads across input conditions (RQ1). Next, we ablate the top heads while the models read code-switched images (RQ2). Finally, we compare head positions across models.
+
+\subsection{Availability: Script identity is decodable from the first vision-encoder layer}
 \label{sec:probes}
 
-All four vision encoders separate Latin from Devanagari patches above chance from layer 0 (Figure~\ref{fig:probes}, Table~\ref{tab:probes}). Accuracy varies widely across encoders. InternVL3-2B and PaliGemma-3B reach near-perfect accuracy, Qwen2-VL-2B plateaus near 0.81, and SmolVLM stays near 0.63 at every depth.
+We first ask whether the image path carries script identity at all. If it did not, a difference between text and image head sets would be expected. Instead, all four vision encoders separate Latin from Devanagari patches above chance from layer 0 (Figure~\ref{fig:probes}, Table~\ref{tab:probes}). Accuracy varies widely across encoders. InternVL3-2B and PaliGemma-3B reach near-perfect accuracy, Qwen2-VL-2B plateaus near 0.81, and SmolVLM stays near 0.63 at every depth.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.62\linewidth]{figures/script_probes.png}
-\caption{Script identity is linearly decodable from the first vision-encoder layer in all four models, but accuracy ranges from near chance to near perfect. SmolVLM does not improve with depth. The dashed line marks chance (0.5).}
+\caption{Script-probe balanced accuracy (Latin vs.\ Devanagari patches) at every vision-encoder layer. Script identity is linearly decodable from the first layer in all four models, but accuracy ranges from near chance to near perfect. The dashed line marks chance.}
 \label{fig:probes}
 \end{figure}
 
 \begin{table}[t]
 \centering
-\caption{Every encoder separates the two scripts above chance, and every probe labels Hindi written in Latin script as Latin. Peak and code-switched columns give balanced accuracy, which patch-level cross-validation may inflate (Section~\ref{sec:limitations}). The last column gives the share of transliteration controls labeled Latin. It uses new images and is not affected.}
+\caption{Script-probe summary. Peak and code-switched columns give balanced accuracy, which patch-level cross-validation may inflate. The last column gives the share of transliteration controls labeled Latin, measured on new images. Every probe labels Hindi written in Latin script as Latin.}
 \label{tab:probes}
 \begin{tabular}{l l c c c}
 \toprule
@@ -269,75 +279,59 @@ SmolVLM      & SigLIP-SO400M & 0.630 (8 of 27) & 62.4 & 84.0 \\
 \end{tabular}
 \end{table}
 
-The same encoder family can give very different results. PaliGemma-3B and SmolVLM both use SigLIP-SO400M, but they sit at opposite ends. PaliGemma-3B runs the encoder at 448 pixels and keeps all 1,024 patch tokens, while SmolVLM gives it lower-resolution, pooled tokens. All models see the same images and fonts, so this deployment difference is a likely cause.
+The same encoder family can yield very different results. PaliGemma-3B and SmolVLM both use SigLIP-SO400M but sit at opposite ends. PaliGemma-3B runs the encoder at 448 pixels and keeps all 1,024 patch tokens, while SmolVLM passes it lower-resolution, pooled tokens. Because all models receive the same images and fonts, this deployment difference is a likely cause. The probes also track script rather than language. Applied to the transliteration controls, each model's best-layer probe labels most of them Latin, at rates at or above its accuracy on code-switched images. These results indicate that script identity is available to every decoder, so differences between text and image head sets do not come from a missing script signal.
 
-The probes track script rather than language. Each model's best-layer probe labels most transliteration controls as Latin, at rates at or above its accuracy on code-switched images (Table~\ref{tab:probes}). These controls are new images, so the patch-level cross-validation does not affect this check. Script identity is therefore available to every decoder. Differences between text and image head sets (Section~\ref{sec:overlap}) do not come from a missing script signal.
-
-\subsection{Whether text and image inputs share heads depends on the model (RQ1)}
+\subsection{Modality: Head sharing between text and image input depends on the model}
 \label{sec:overlap}
 
-Figure~\ref{fig:overlap} compares two overlaps for each model and language. The first is between the text and image-only head sets ($\AcapC$). The second is between the two image conditions ($\BcapC$). Table~\ref{tab:overlap} in Appendix~\ref{app:overlap} lists all values. The four models show three patterns.
+We next ask whether the same sentence recruits the same heads as text and as an image. Figure~\ref{fig:overlap} compares, for each model and language, the overlap between the text and image-only head sets ($\AcapC$) with the overlap between the two image conditions ($\BcapC$). If the decoder processed a language with the same heads regardless of modality, text-image overlap would approach image-image overlap. Instead, the four models show three distinct patterns (full values in Appendix~\ref{app:overlap}).
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figures/overlap_dumbbell.pdf}
-\caption{Text and image inputs use separate heads in Qwen2-VL-2B and SmolVLM, nearly the same heads in InternVL3-2B for Hindi, and an unresolved pattern in PaliGemma-3B. Circles show text versus image-only overlap ($\AcapC$). Squares show image+query versus image-only overlap ($\BcapC$). Shading marks each model's chance level.}
+\caption{Jaccard overlap of the top 20 heads between input conditions. Circles show text versus image-only overlap ($\AcapC$), and squares show image+query versus image-only overlap ($\BcapC$). Shading marks each model's chance level. Text and image inputs use separate heads in Qwen2-VL-2B and SmolVLM, nearly the same heads in InternVL3-2B for Hindi, and an unresolved pattern in PaliGemma-3B.}
 \label{fig:overlap}
 \end{figure}
 
-\paragraph{Separate heads in Qwen2-VL-2B and SmolVLM.}
-In both models, text-image overlap stays low for every language, while the two image conditions overlap strongly. Once an image is present, these models use a consistent head set, with or without a query. That set differs from the head set for the same sentence as text.
+In Qwen2-VL-2B and SmolVLM, text-image overlap stays low for every language, while the two image conditions overlap strongly. Once an image is present, these models recruit a consistent head set with or without a query, and that set differs from the head set for the same sentence as text. InternVL3-2B shows the opposite pattern for Hindi only. Its Hindi text-image overlap reaches 0.667, well above its English and Spanish overlaps. Hindi competence does not explain this result, because Qwen2-VL-2B models Hindi at least as well (Table~\ref{tab:competence}) and keeps its heads separate. For PaliGemma-3B, all overlaps lie between 0.21 and 0.33, modestly above its chance level of 0.143. Its grid has only 144 heads, so a top-20 set covers a large fraction of it and Jaccard overlap loses resolution. These patterns hold for every $K$ from 5 to 80 (Appendix~\ref{app:ksweep}).
 
-\paragraph{Shared heads for Hindi in InternVL3-2B.}
-InternVL3-2B uses nearly the same heads for Hindi as text and as an image. Its Hindi text-image overlap is 0.667, well above its English and Spanish overlaps. Hindi competence does not explain this result. Qwen2-VL-2B models Hindi at least as well (Table~\ref{tab:competence}) and keeps its heads separate. With one model and one language, we treat this result as tentative.
-
-\paragraph{Inconclusive overlap in PaliGemma-3B.}
-All of PaliGemma-3B's overlaps lie between 0.21 and 0.33, modestly above its chance level of 0.143. Its image-image overlap is not higher than its text-image overlap. Its grid has only 144 heads, so a top-20 set covers a large fraction of it and Jaccard overlap loses resolution.
-
-\paragraph{Layer placement.}
-The layer placement of the top heads matches these patterns (Figure~\ref{fig:layers}, Table~\ref{tab:layers}). Qwen2-VL-2B places almost all of its text-condition heads in layers 0--1 but few of its image-condition heads there. InternVL3-2B also places its text-condition heads early. For Hindi, its image-condition heads are early as well, which matches its shared Hindi heads. SmolVLM places its text-condition heads partly early and its image-condition heads mostly later. PaliGemma-3B places few heads in layers 0--1 in any condition.
+The layer placement of the top heads mirrors these patterns (Figure~\ref{fig:layers}). Qwen2-VL-2B places almost all of its text-condition heads in layers 0--1 but few of its image-condition heads there. InternVL3-2B also places its text-condition heads early, and for Hindi its image-condition heads follow them into the same layers, matching its shared Hindi heads. SmolVLM places its text-condition heads partly early and its image-condition heads mostly later, while PaliGemma-3B places few heads in layers 0--1 in any condition.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figures/layer_placement.pdf}
-\caption{Text-condition heads concentrate in layers 0--1 in the two Qwen-family models, while image-condition heads mostly lie in later layers. InternVL3-2B's Hindi image-condition heads are the exception. The dashed line shows the count expected if the 20 heads were spread evenly over the grid.}
+\caption{Number of each top-20 head set that lies in decoder layers 0--1, by model, language, and condition. Text-condition heads concentrate in the first two layers in both Qwen-family models, while image-condition heads mostly lie later. InternVL3-2B's Hindi image-condition heads are the exception. The dashed line shows the count expected if the 20 heads were spread evenly over the grid.}
 \label{fig:layers}
 \end{figure}
 
-\paragraph{Robustness.}
-The three patterns hold for every $K$ from 5 to 80 (Appendix~\ref{app:ksweep}).
+Together, these results indicate that language-important heads are not modality-invariant in general. Whether text and image inputs share heads depends on the model and, for InternVL3-2B, on the language. A strong script signal in the encoder does not by itself lead to shared heads. InternVL3-2B and PaliGemma-3B have the strongest script signals, but only InternVL3-2B shares heads, although PaliGemma-3B's inconclusive overlap makes this comparison weak.
 
-\paragraph{Encoder signal and shared heads.}
-A strong script signal in the encoder does not by itself lead to shared heads. InternVL3-2B and PaliGemma-3B have the strongest script signals, but only InternVL3-2B shares heads. PaliGemma-3B's overlap is inconclusive, so this comparison is weak.
-
-\subsection{The top heads are necessary for coherent output, but ablation does not isolate language routing (RQ2)}
+\subsection{Necessity: The top heads are required for coherent generation}
 \label{sec:ablation}
 
-Zero-ablating the top 20 heads for either language destroys generation in every model (Figure~\ref{fig:fluency}). At most 1\% of outputs stay fluent, against 71--76\% for the random-head control. The collapse takes a different form in each model. PaliGemma-3B mostly returns empty strings. Qwen2-VL-2B returns output without letters or with fragments of Chinese, Japanese, or Korean (CJK) characters. InternVL3-2B's Hindi-head ablations contain CJK characters in every output, and SmolVLM repeats a special token. No un-ablated output contains CJK characters. Mean ablation also destroys generation, except for SmolVLM's Hindi heads. Appendix~\ref{app:ablation} gives the counts.
+Head overlap alone does not establish that the identified heads affect generation. To evaluate their causal role, we ablate each model's top 20 heads while it reads Hindi-English code-switched images. Zero-ablating the top heads for either language destroys generation in every model (Figure~\ref{fig:fluency}). At most 1\% of outputs stay fluent, against 71--76\% for the random-head control. The collapse takes a different form in each model. PaliGemma-3B mostly returns empty strings, Qwen2-VL-2B returns output without letters or with fragments of Chinese, Japanese, or Korean (CJK) characters, InternVL3-2B's Hindi-head ablations contain CJK characters in every output, and SmolVLM repeats a special token. No un-ablated output contains CJK characters. Mean ablation also destroys generation, except for SmolVLM's Hindi heads (Appendix~\ref{app:ablation}).
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figures/fluency_bars.pdf}
-\caption{Zero-ablating the top 20 heads for either language destroys generation in every model, while ablating 20 random heads leaves most outputs fluent. Mean ablation also destroys generation, except for SmolVLM's Hindi heads. Bars show the percentage of 400 generations that keep at least half of the un-ablated output's words.}
+\caption{Fluency under head ablation on Hindi-English code-switched images. Bars show the percentage of 400 generations that keep at least half of the un-ablated output's words. Zero-ablating the top 20 heads for either language destroys generation in every model, while ablating 20 random heads leaves most outputs fluent.}
 \label{fig:fluency}
 \end{figure}
 
-The top heads are therefore necessary for coherent output, and a random set of the same size is not. The ablation does not show that these heads route language. English heads and Hindi heads cause the same collapse, and the two sets largely coincide (Section~\ref{sec:lineage}). In Qwen2-VL-2B they cover almost all 24 heads in layers 0--1, so the collapse may reflect general damage to the first layers. A test of language routing needs a random control drawn from the same layers and head sets contrasted between languages.
+These results show that the top heads are necessary for coherent output, and that a random set of the same size is not. They do not show that these heads route language. English heads and Hindi heads cause the same collapse, and the two sets largely coincide (Section~\ref{sec:lineage}). In Qwen2-VL-2B they cover almost all 24 heads in layers 0--1, so the collapse may reflect general damage to the first layers. Testing language routing requires a random control drawn from the same layers and head sets contrasted between languages. We therefore answer RQ2 in the negative for language routing and in the positive for necessity.
 
-A script-change rate misreads this collapse as a change of language. Output without letters changes the script label and therefore counts as a script change. In the single run, all 74 script changes after ablating Qwen2-VL-2B's Hindi heads were outputs that lost all letters, and so were all 97 for PaliGemma-3B. InternVL3-2B shows a low rate because its collapsed outputs keep enough Latin letters to retain a Latin label. Differences in script-change rate between models therefore reflect how each model fails, not how it routes language. Appendix~\ref{app:ablation} reports the script-change rates. The Spanish-English rates, based on a language identifier, have not been checked for collapse.
+The ablation also exposes a failure of the script-change metric. Output without letters changes the script label and therefore counts as a change of script. In the single run, all 74 script changes after ablating Qwen2-VL-2B's Hindi heads were outputs that lost all letters, and so were all 97 for PaliGemma-3B. InternVL3-2B shows a low script-change rate only because its collapsed outputs keep enough Latin letters to retain a Latin label. Differences in script-change rate between models therefore reflect how each model fails rather than how it routes language (Appendix~\ref{app:ablation}). Without ablation, SmolVLM produces Devanagari output for 37 of 100 images, against 5 to 15 for the other models. Competence does not explain this difference, because SmolVLM has the highest Hindi perplexity (Table~\ref{tab:competence}).
 
-Without ablation, SmolVLM produces Devanagari output for 37 of 100 images, against 5 to 15 for the other models. Competence does not explain this, because SmolVLM has the highest Hindi perplexity (Table~\ref{tab:competence}). We leave its cause open.
-
-\subsection{Shared head positions across models match layer placement (exploratory)}
+\subsection{Cross-model consistency: Shared head positions follow layer placement}
 \label{sec:lineage}
 
-Most top text-condition heads are shared across languages within each model. The number of heads in the top 20 for all three languages is 18 for Qwen2-VL-2B, 14 for InternVL3-2B, 14 for SmolVLM, and 15 for PaliGemma-3B. LAHIS therefore mostly ranks language-general heads. The English and Hindi sets ablated in Section~\ref{sec:ablation} are largely the same heads.
+Finally, we ask whether the top heads occupy the same positions across models. Within each model, most top text-condition heads are shared across languages. The number of heads in the top 20 for all three languages is 18 for Qwen2-VL-2B, 14 for InternVL3-2B, 14 for SmolVLM, and 15 for PaliGemma-3B. LAHIS therefore mostly ranks language-general heads, which is also why the English and Hindi sets in Section~\ref{sec:ablation} largely coincide.
 
-Across models, the two Qwen-family models share the most head positions (Table~\ref{tab:crossmodel}). The other pairs share far fewer, and SmolVLM and PaliGemma-3B share none.
+Across models, the two Qwen-family models share the most head positions (Table~\ref{tab:crossmodel}). The other pairs share far fewer, and SmolVLM and PaliGemma-3B share none. Layer placement predicts the Qwen-pair overlap. Both models place most of their top text-condition heads in layers 0--1, which hold 24 heads in each model. If each model placed those heads at random within the two layers, the sets would share about 11, 15, and 15 positions for English, Spanish, and Hindi, close to the observed 13, 16, and 15.
 
 \begin{table}[t]
 \centering
-\caption{The two Qwen-family models share the most head positions, close to the number expected from layer placement alone. The expectation assumes that each model places its heads in layers 0--1 at random within those two layers.}
+\caption{Shared (layer, head) positions between two models' top-20 text-condition heads, per language. The Qwen-family pair shares the most positions, close to the number expected from layer placement alone. The expectation assumes that each model places its heads in layers 0--1 at random within those two layers.}
 \label{tab:crossmodel}
 \begin{tabular}{l ccc}
 \toprule
@@ -354,76 +348,23 @@ SmolVLM, PaliGemma-3B & 0 & 0 & 0 \\
 \end{tabular}
 \end{table}
 
-Layer placement predicts the overlap of the Qwen-family pair. Both models place most of their top text-condition heads in layers 0--1, which hold 24 heads in each model. If each model placed those heads at random within the two layers, the sets would share about 11, 15, and 15 positions for English, Spanish, and Hindi. The observed counts are 13, 16, and 15. The other models place fewer top heads in layers 0--1 and have differently shaped grids, so they share fewer positions.
-
-A shared head position has no meaning beyond layer placement unless the two models share initialization. Heads within a layer are interchangeable across independently trained models. The Qwen2.5 report does not state whether Qwen2.5 was initialized from Qwen2 weights (Section~\ref{sec:models}), and the other pairs come from separate lineages. The data therefore show a layer-level pattern. With four models, decoder family varies together with head count, grid shape, attention type, and image compression. Our data cannot show whether the pattern follows decoder family.
-
-% ============================================================
-\section{What We Can and Cannot Conclude}
-\label{sec:conclusions_table}
-
-Table~\ref{tab:claims} rates the evidence for each observation. \emph{Supported} means consistent evidence against a matched control. \emph{Tentative} means evidence from one model or one language. \emph{Inconclusive} means the measure cannot separate the alternatives. \emph{Not supported} means the evidence does not back the claim.
-
-\begin{table}[t]
-\centering
-\caption{Four observations are supported. The claims that the top heads route language and that head positions follow decoder family are not supported.}
-\label{tab:claims}
-\small
-\begin{tabular}{>{\raggedright\arraybackslash}p{0.36\linewidth} >{\raggedright\arraybackslash}p{0.40\linewidth} >{\raggedright\arraybackslash}p{0.14\linewidth}}
-\toprule
-Observation & Evidence & Strength \\
-\midrule
-Script identity is decodable from the first vision-encoder layer in all four models & Per-layer probes and a transliteration check on new images. Patch-level folds may inflate accuracy (Section~\ref{sec:probes}). & Supported \\
-\addlinespace
-Qwen2-VL-2B and SmolVLM use largely different heads for text and image input & Overlap above chance and stable across $K$, from one run (Section~\ref{sec:overlap}). & Supported \\
-\addlinespace
-InternVL3-2B uses nearly the same heads for Hindi text and Hindi images & One model and one language (Section~\ref{sec:overlap}). & Tentative \\
-\addlinespace
-PaliGemma-3B shares or separates heads & Overlap near its chance level (Section~\ref{sec:overlap}). & Inconclusive \\
-\addlinespace
-Text-condition heads concentrate in layers 0--1 in the Qwen-family models & Layer counts for every language (Section~\ref{sec:overlap}). & Supported \\
-\addlinespace
-The top 20 heads are necessary for coherent output on code-switched images & Zero ablation leaves at most 1\% of outputs fluent, against 71--76\% for random heads, in all four models. The fluency proxy is coarse (Section~\ref{sec:ablation}). & Supported \\
-\addlinespace
-The top heads route output language or script & Heads of both languages cause the same collapse, and no control is matched by layer (Section~\ref{sec:ablation}). & Not supported \\
-\addlinespace
-Shared head positions across models follow decoder family & Same-family matches are close to what layer placement predicts (Section~\ref{sec:lineage}). & Not supported \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Two points follow for interpretability research on VLMs. First, language heads found in one VLM may not transfer to another. Our four models differ in whether text and image inputs share heads, in where their top heads sit, and in how well their encoders separate scripts. Second, head-ablation studies should check output quality. In our study, a script-change metric recorded collapsed output as a change of script and produced differences between models that disappear under a fluency check.
-
-% ============================================================
-\section{Limitations}
-\label{sec:limitations}
-
-\paragraph{Model scale.}
-All four models have at most 3B parameters. Larger VLMs may organize text and image processing differently.
-
-\paragraph{Monolingual head identification.}
-We identify heads on monolingual sentences. RQ1 therefore compares text and image processing of single-language content, and code-switched text enters only through the probes and the ablation. Scoring heads on code-switched sentences, with the loss restricted to one language's tokens, would link the head sets directly to code-switched input.
-
-\paragraph{Ablation design.}
-The ablations use absolute top-20 sets, a random control drawn from the whole network, and a coarse fluency proxy. These choices can show that the heads are necessary for coherent output. They cannot show what role the heads play in routing language.
-
-\paragraph{Probe evaluation.}
-The probe folds split patches, not images, so patches from one image can appear in both training and test data. This likely inflates the reported accuracy. The transliteration check uses new images and is not affected. All Devanagari patches also come from the 173 Hindi-English images among the 300 probed.
-
-\paragraph{Single-run overlap.}
-The overlap values come from one run, with the permutation baseline as the only control. Their variance across runs is unknown.
-
-\paragraph{Covarying architecture.}
-Decoder family varies together with grid shape, head count, attention type, and image compression. We cannot attribute a difference between models to any one of these factors.
-
-\paragraph{Two language pairs.}
-With two language pairs, we cannot tell whether InternVL3-2B's Hindi-specific overlap depends on script or on language family.
+A shared head position carries no meaning beyond layer placement unless the two models share initialization, because heads within a layer are interchangeable across independently trained models. The Qwen2.5 report does not state whether Qwen2.5 was initialized from Qwen2 weights, and the other pairs come from separate lineages. These results indicate a layer-level pattern rather than head-level correspondence. With four models in which decoder family varies together with head count, grid shape, attention type, and image compression, our data cannot show whether this pattern follows decoder family.
 
 % ============================================================
 \section{Conclusion}
 \label{sec:conclusion}
 
-We compared the attention heads that four small VLMs rely on when a sentence arrives as text and as a rendered image. The answer depends on the model. Two models use largely separate heads, with the text heads concentrated in the first decoder layers. One model uses nearly the same heads for Hindi only, and for one model our measure is inconclusive. All vision encoders encode script identity from their first layer, so these differences do not come from a missing script signal. Ablating the top heads destroys generation in every model, while ablating random heads does not. The top heads are therefore necessary for coherent output, but the ablation cannot show that they route language. A script-change metric counts this collapse as a change of script, so head-ablation studies need a check on output quality. Future work can score heads on code-switched text, contrast heads between languages, use controls matched by layer, and test larger VLMs and language pairs that separate script from language family.
+We investigated whether the attention heads that matter for a language in a VLM's decoder are the same when the language arrives as text tokens and as a rendered image. Across four small VLMs, we found that the answer depends on the model. Qwen2-VL-2B and SmolVLM recruit largely separate heads for the two inputs, with text heads concentrated in the first decoder layers. InternVL3-2B recruits nearly the same heads for Hindi only, and the measure is inconclusive for PaliGemma-3B. Script probes showed that every vision encoder encodes script identity from its first layer, so these differences do not come from a missing script signal. Ablation showed that the top heads are necessary for coherent generation on code-switched images, but it did not isolate a role in language routing, and a script-change metric misread the resulting collapse as a change of language. Together, these findings indicate that language-head findings from text-only models do not necessarily transfer to the visual input path of VLMs, and that head-ablation studies need a check on output quality. Future work may score heads directly on code-switched text, contrast heads between languages, and extend the analysis to larger VLMs and to language pairs that separate script from language family.
+
+\section*{Limitations}
+
+Our study covers four VLMs with at most 3B parameters and two language pairs. While this setting allows gradient attribution over every head, it remains unclear whether the observed patterns extend to larger VLMs. With only Hindi-English and Spanish-English, we also cannot tell whether InternVL3-2B's Hindi-specific overlap depends on script or on language family.
+
+We identify heads on monolingual sentences, following \citet{liu2026lahis}. RQ1 therefore compares text and image processing of single-language content, and code-switched text enters only through the probes and the ablation. Scoring heads on code-switched sentences, with the loss restricted to one language's tokens, would link the head sets directly to code-switched input.
+
+Our ablations use absolute top-20 head sets, a random control drawn from the whole network, and a coarse fluency proxy. These choices establish that the heads are necessary for coherent output, but they cannot establish what role the heads play in routing language. A layer-matched control and head sets contrasted between languages remain an important direction for future work.
+
+Finally, the script-probe folds split patches rather than images, so patches from one image can appear in both training and test data, which likely inflates the reported accuracies. The transliteration check uses new images and is not affected. The head-overlap values come from a single run, and decoder family varies together with grid shape, head count, attention type, and image compression, so we cannot attribute a difference between models to any one of these factors.
 
 % ============================================================
 \bibliography{references}
@@ -470,11 +411,11 @@ Model & Lang & $\AcapB$ & $\AcapC$ & $\BcapC$ \\
 \section{Overlap at Other Values of \texorpdfstring{$K$}{K}}
 \label{app:ksweep}
 
-The patterns in Section~\ref{sec:overlap} hold at the two extremes of $K \in \{5, 10, 20, 40, 80\}$ (Table~\ref{tab:ksweep}). The full sweep is released with the code as \texttt{checkpoints/head\_overlap\_matrix.json}.
+Table~\ref{tab:ksweep} reports overlap at the two extremes of $K \in \{5, 10, 20, 40, 80\}$. The full sweep is released with the code as \texttt{checkpoints/head\_overlap\_matrix.json}.
 
 \begin{table}[H]
 \centering
-\caption{Qwen2-VL-2B and SmolVLM keep text-image overlap ($\AcapC$) below image-image overlap ($\BcapC$) at $K{=}5$ and $K{=}80$ for every language. InternVL3-2B keeps the two close for Hindi. PaliGemma-3B's overlaps are uniformly higher because its small grid raises chance-level overlap.}
+\caption{Text-image ($\AcapC$) and image-image ($\BcapC$) overlap at $K{=}5$ and $K{=}80$. Qwen2-VL-2B and SmolVLM keep $\AcapC$ below $\BcapC$ for every language, and InternVL3-2B keeps the two close for Hindi. PaliGemma-3B's overlaps are uniformly higher because its small grid raises chance-level overlap.}
 \label{tab:ksweep}
 \begin{tabular}{ll cccc}
 \toprule
@@ -508,7 +449,7 @@ Model & Lang & $\AcapC$@5 & $\AcapC$@80 & $\BcapC$@5 & $\BcapC$@80 \\
 
 \begin{table}[H]
 \centering
-\caption{In both Qwen-family models, most text-condition heads lie in layers 0--1. Entries count how many of each top-20 set lie in those layers. Layers 0--1 hold 24 heads in Qwen2-VL-2B and InternVL3-2B, 64 in SmolVLM, and 16 in PaliGemma-3B.}
+\caption{Number of each top-20 head set that lies in decoder layers 0--1 (the values plotted in Figure~\ref{fig:layers}). Layers 0--1 hold 24 heads in Qwen2-VL-2B and InternVL3-2B, 64 in SmolVLM, and 16 in PaliGemma-3B.}
 \label{tab:layers}
 \begin{tabular}{ll ccc}
 \toprule
@@ -528,7 +469,7 @@ Model & Lang & A: text & B: image+query & C: image-only \\
 \section{Ablation Outcomes}
 \label{app:ablation}
 
-Table~\ref{tab:fluency} gives the fluency counts behind Figure~\ref{fig:fluency}. The collapsed outputs take these forms:
+Table~\ref{tab:fluency} gives the fluency counts behind Figure~\ref{fig:fluency}. The collapsed outputs take the following forms:
 \begin{itemize}
     \item PaliGemma-3B returns an empty string for 389 of 400 Hindi-head ablations.
     \item Qwen2-VL-2B returns output without letters for 278 of 400 Hindi-head ablations and CJK fragments for 328 of 400 English-head ablations.
@@ -538,7 +479,7 @@ Table~\ref{tab:fluency} gives the fluency counts behind Figure~\ref{fig:fluency}
 
 \begin{table}[H]
 \centering
-\caption{Zero ablation of either language's top heads leaves almost no fluent output, while random-head ablation leaves most outputs fluent. Entries count fluent outputs out of 400 (one run and three seeds of 100 images).}
+\caption{Fluent outputs out of 400 (one run and three seeds of 100 images). Zero ablation of either language's top heads leaves almost no fluent output, while random-head ablation leaves most outputs fluent.}
 \label{tab:fluency}
 \begin{tabular}{l ccccc}
 \toprule
@@ -552,11 +493,11 @@ PaliGemma-3B & 0 & 4 & 5 & 0 & 291 \\
 \end{tabular}
 \end{table}
 
-Tables~\ref{tab:ablation} and~\ref{tab:seeds} report the script-change rates for Hindi-English, from the single run and as means over the three seeds. Nearly all zero-ablation changes are collapsed output (Section~\ref{sec:ablation}), so these rates do not measure language routing. The random-head draw in the single run changed 31\% of PaliGemma-3B's outputs, against 5--11\% in the three seeded draws. About half of its generations were degenerate, which suggests that this draw hit heads the model depends on. Table~\ref{tab:es_ablation} reports the Spanish-English rates, which count a change in the dominant language that \texttt{langid} assigns to the output.
+Tables~\ref{tab:ablation} and~\ref{tab:seeds} report the Hindi-English script-change rates from the single run and as means over the three seeds. Nearly all zero-ablation changes are collapsed output (Section~\ref{sec:ablation}), so these rates do not measure language routing. The random-head draw in the single run changed 31\% of PaliGemma-3B's outputs, against 5--11\% in the three seeded draws. About half of its generations were degenerate, which suggests that this draw hit heads the model depends on. Table~\ref{tab:es_ablation} reports the Spanish-English rates, which count a change in the dominant language that \texttt{langid} assigns to the output.
 
 \begin{table}[H]
 \centering
-\caption{Script-change rates in the single run are high for Qwen2-VL-2B and PaliGemma-3B because their collapsed outputs lose all letters. Entries give the percentage of 100 Hindi-English generations whose script label changes. Columns are Qwen2-VL-2B, InternVL3-2B, SmolVLM, and PaliGemma-3B.}
+\caption{Script-change rates in the single run, as the percentage of 100 Hindi-English generations whose script label changes. Columns are Qwen2-VL-2B, InternVL3-2B, SmolVLM, and PaliGemma-3B. Rates are high for Qwen2-VL-2B and PaliGemma-3B because their collapsed outputs lose all letters.}
 \label{tab:ablation}
 \begin{tabular}{l cccc}
 \toprule
@@ -574,7 +515,7 @@ Random 20 heads & 9 & 9 & 9 & 31 \\
 
 \begin{table}[H]
 \centering
-\caption{The seeded runs reproduce the single-run pattern, and PaliGemma-3B's random-head rate falls to the level of the other models. Entries give script-change rates (\%) as mean $\pm$ standard deviation over three seeds.}
+\caption{Script-change rates (\%) as mean $\pm$ standard deviation over three seeds. The seeded runs reproduce the single-run pattern, and PaliGemma-3B's random-head rate falls to the level of the other models.}
 \label{tab:seeds}
 \begin{tabular}{l ccccc}
 \toprule
@@ -590,7 +531,7 @@ PaliGemma-3B & $97.3 \pm 0.5$ & $15.3 \pm 2.9$ & $7.0 \pm 2.8$  & $29.3 \pm 2.6$
 
 \begin{table}[H]
 \centering
-\caption{Spanish-English language-change rates exceed the random-head control in every model, but they have not been checked for collapsed output. Entries give the percentage of 100 generations whose dominant language changes under zero ablation.}
+\caption{Spanish-English language-change rates, as the percentage of 100 generations whose dominant language changes under zero ablation. The rates exceed the random-head control in every model but have not been checked for collapsed output.}
 \label{tab:es_ablation}
 \begin{tabular}{l ccc}
 \toprule
@@ -612,14 +553,14 @@ Figures~\ref{fig:lahis_hi} and~\ref{fig:lahis_es} show the LAHIS scores behind t
 \begin{figure}[p]
 \centering
 \includegraphics[width=0.95\linewidth]{figures/lahis_hindi.png}
-\caption{For Hindi, Qwen2-VL-2B's text-condition heads lie in the first two layers while its image-condition heads spread through the network, and InternVL3-2B's three conditions highlight the same early heads. Rows are models and columns are conditions. Cyan rings mark each panel's top 20 heads. Scores are min-max normalized within each panel.}
+\caption{LAHIS head importance for Hindi. Rows are models and columns are input conditions. Cyan rings mark each panel's top 20 heads, and scores are min-max normalized within each panel. Qwen2-VL-2B's text-condition heads lie in the first two layers while its image-condition heads spread through the network, and InternVL3-2B's three conditions highlight the same early heads.}
 \label{fig:lahis_hi}
 \end{figure}
 
 \begin{figure}[p]
 \centering
 \includegraphics[width=0.95\linewidth]{figures/lahis_spanish.png}
-\caption{For Spanish, the important heads lie in the same layers as for Hindi, but InternVL3-2B's text and image panels agree less than for Hindi. Panels follow Figure~\ref{fig:lahis_hi}.}
+\caption{LAHIS head importance for Spanish, plotted as in Figure~\ref{fig:lahis_hi}. The important heads lie in the same layers as for Hindi, but InternVL3-2B's text and image panels agree less than for Hindi.}
 \label{fig:lahis_es}
 \end{figure}
 
