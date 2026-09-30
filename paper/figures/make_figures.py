@@ -7,13 +7,13 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 
 BLUE = "#2a78d6"
 ORANGE = "#eb6834"
 GRAY = "#8f8e89"
+AQUA = "#1baf7a"
 INK = "#0b0b0b"
 INK_2 = "#52514e"
 GRID = "#e4e3df"
@@ -89,97 +89,92 @@ def overlap_dumbbell(path):
     plt.close(fig)
 
 
-def ablation_bars(path):
-    # Table 7 (seed variance): mean ± sd over three seeds, percent of outputs whose script flips.
-    hi_zero = ([70.3, 11.7, 35.3, 97.3], [5.0, 1.2, 2.1, 0.5])
-    en_zero = ([46.3, 17.0, 35.3, 15.3], [3.4, 2.2, 2.1, 2.9])
-    random = ([7.0, 14.0, 8.7, 7.0], [4.9, 6.2, 0.9, 2.8])
-    en_mean = ([33.7, 23.3, 47.0, 65.0], [8.8, 2.5, 1.6, 2.9])
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6.5, 2.3), gridspec_kw={"width_ratios": [3, 2.5]})
+def fluency_bars(path):
+    # Author's fluency check: outputs that keep >=50% of the un-ablated output's words,
+    # out of 400 per cell (single run + three seeds, 100 images each).
+    fluent = {
+        "hi-zero": [0, 0, 1, 0],
+        "en-zero": [0, 0, 1, 4],
+        "hi-mean": [1, 0, 243, 5],
+        "en-mean": [1, 0, 3, 0],
+        "random": [292, 303, 283, 291],
+    }
+    pct = {k: np.array(v) / 4.0 for k, v in fluent.items()}
+    series = [
+        ("hi-zero", "Hindi heads, zero-ablated", dict(color=BLUE)),
+        ("en-zero", "English heads, zero-ablated", dict(color=ORANGE)),
+        ("hi-mean", "Hindi heads, mean-ablated", dict(color="white", edgecolor=BLUE, hatch="\\\\\\\\")),
+        ("en-mean", "English heads, mean-ablated", dict(color="white", edgecolor=ORANGE, hatch="\\\\\\\\")),
+        ("random", "20 random heads (control)", dict(color="white", edgecolor=GRAY, hatch="////")),
+    ]
+    fig, ax = plt.subplots(figsize=(6.5, 2.4))
     x = np.arange(len(MODELS))
-    err = dict(ecolor=INK_2, elinewidth=0.7, capsize=1.8, capthick=0.7)
-    labels = ["Qwen2-VL\n2B", "InternVL3\n2B", "SmolVLM\n", "PaliGemma\n3B"]
-
-    w = 0.26
-    ax1.bar(x - w, hi_zero[0], w * 0.9, yerr=hi_zero[1], color=BLUE, label="Hindi heads, zero-ablated", error_kw=err)
-    ax1.bar(x, en_zero[0], w * 0.9, yerr=en_zero[1], color=ORANGE, label="English heads, zero-ablated", error_kw=err)
-    ax1.bar(x + w, random[0], w * 0.9, yerr=random[1], color="white", edgecolor=GRAY, hatch="////",
-            linewidth=0.8, label="random 20 heads (control)", error_kw=err)
-    ax1.set_title("(a) Top heads vs. random heads", fontsize=8, color=INK, loc="left")
-
-    w2 = 0.36
-    ax2.bar(x - w2 / 2, en_zero[0], w2 * 0.9, yerr=en_zero[1], color=ORANGE, label="zero-ablated", error_kw=err)
-    ax2.bar(x + w2 / 2, en_mean[0], w2 * 0.9, yerr=en_mean[1], color="white", edgecolor=ORANGE, hatch="\\\\\\\\",
-            linewidth=0.8, label="mean-ablated", error_kw=err)
-    ax2.set_title("(b) English heads: zero vs. mean ablation", fontsize=8, color=INK, loc="left")
-
-    for ax in (ax1, ax2):
-        ax.set_xticks(x)
-        ax.set_xticklabels(labels, fontsize=6.5)
-        ax.set_ylim(0, 105)
-        ax.set_yticks([0, 25, 50, 75, 100])
-        ax.grid(axis="y", color=GRID, lw=0.5)
-        ax.set_axisbelow(True)
-        ax.tick_params(axis="x", length=0)
-        ax.legend(loc="upper left", fontsize=7, handlelength=1.4, borderaxespad=0.2)
-    # SmolVLM's zero-ablated generations are degenerate, so its zero-ablation flips carry no routing signal.
-    for ax, top, note in ((ax1, max(hi_zero[0][2], en_zero[0][2]) + 4, "degenerate\noutputs"),
-                          (ax2, en_mean[0][2] + 4, "zero-ablated\noutputs degenerate")):
-        ax.text(2, top, note, ha="center", va="bottom", fontsize=6, color=INK_2, linespacing=0.9)
-    ax1.set_ylabel("outputs whose script flips (%)")
-    fig.tight_layout(w_pad=2)
+    w = 0.16
+    for k, (key, label, style) in enumerate(series):
+        xs = x + (k - 2) * w
+        ax.bar(xs, pct[key], w * 0.88, label=label, linewidth=0.8, **style)
+        for xi, v in zip(xs, pct[key]):
+            if v < 5:
+                ax.text(xi, v + 1.2, f"{v:g}", ha="center", va="bottom", fontsize=5.5, color=INK_2)
+    ax.set_xticks(x)
+    ax.set_xticklabels(MODELS, fontsize=7)
+    ax.set_ylim(0, 100)
+    ax.set_yticks([0, 25, 50, 75, 100])
+    ax.set_ylabel("outputs still fluent (%)")
+    ax.grid(axis="y", color=GRID, lw=0.5)
+    ax.set_axisbelow(True)
+    ax.tick_params(axis="x", length=0)
+    ax.legend(loc="upper center", ncol=3, fontsize=6.5, bbox_to_anchor=(0.5, 1.22), handlelength=1.4,
+              columnspacing=1.2)
+    fig.tight_layout()
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
 
 
-def lineage_matrix(path):
-    # Section 6.4: shared (layer, head) positions among each pair's top-20 text-condition heads.
-    order = ["Qwen2-VL-2B", "InternVL3-2B", "PaliGemma-3B", "SmolVLM"]
-    family = {"Qwen2-VL-2B": "Qwen2", "InternVL3-2B": "Qwen2.5", "PaliGemma-3B": "Gemma", "SmolVLM": "SmolLM2"}
-    pairs = {
-        ("Qwen2-VL-2B", "InternVL3-2B"): 18,
-        ("Qwen2-VL-2B", "PaliGemma-3B"): 8,
-        ("InternVL3-2B", "PaliGemma-3B"): 9,
-        ("Qwen2-VL-2B", "SmolVLM"): 2,
-        ("InternVL3-2B", "SmolVLM"): 1,
-        ("PaliGemma-3B", "SmolVLM"): 0,
+def layer_placement(path):
+    # How many of each top-20 set lie in decoder layers 0-1, per model, language and condition.
+    counts = {
+        "Qwen2-VL-2B": {"A": [19, 20, 20], "B": [4, 3, 4], "C": [2, 2, 6]},
+        "InternVL3-2B": {"A": [14, 18, 18], "B": [9, 15, 17], "C": [4, 6, 14]},
+        "SmolVLM": {"A": [10, 14, 9], "B": [4, 4, 5], "C": [3, 4, 4]},
+        "PaliGemma-3B": {"A": [5, 6, 7], "B": [3, 3, 3], "C": [6, 7, 5]},
     }
-    n = len(order)
-    mat = np.full((n, n), np.nan)
-    for i, a in enumerate(order):
-        for j, b in enumerate(order):
-            if j < i:
-                mat[i, j] = pairs.get((a, b), pairs.get((b, a)))
-
-    cmap = LinearSegmentedColormap.from_list("blue_seq", ["#f4f8fd", "#86b6ef", "#2a78d6", "#104281"])
-    fig, ax = plt.subplots(figsize=(3.3, 2.7))
-    from matplotlib.patches import Rectangle
-    for i in range(n):
-        for j in range(n):
-            if j < i:
-                v = int(mat[i, j])
-                ax.add_patch(Rectangle((j - 0.5, i - 0.5), 1, 1, facecolor=cmap(v / 20),
-                                       edgecolor="white", linewidth=2))
-                ax.text(j, i, str(v), ha="center", va="center", fontsize=9,
-                        color="white" if v >= 10 else INK)
-    ticks = [f"{m}\n({family[m]})" for m in order]
-    ax.set_xticks(range(n))
-    ax.set_xticklabels(ticks, fontsize=6.5, rotation=0)
-    ax.set_yticks(range(n))
-    ax.set_yticklabels(ticks, fontsize=6.5)
-    ax.set_xlim(-0.5, n - 1.5)
-    ax.set_ylim(n - 0.5, 0.5)
-    for s in ax.spines.values():
-        s.set_visible(False)
-    ax.tick_params(length=0)
-    ax.set_title("Shared (layer, head) positions\nbetween top-20 text-condition sets", fontsize=8, color=INK, pad=6)
-    fig.tight_layout()
+    # Expected count if the 20 heads were spread uniformly over the grid: 20 * heads in layers 0-1 / total heads.
+    chance = {"Qwen2-VL-2B": 20 * 24 / 336, "InternVL3-2B": 20 * 24 / 336,
+              "SmolVLM": 20 * 64 / 768, "PaliGemma-3B": 20 * 16 / 144}
+    styles = {
+        "A": ("A: text", dict(color=BLUE)),
+        "B": ("B: image+query", dict(color=ORANGE, hatch="\\\\\\\\", edgecolor="white")),
+        "C": ("C: image-only", dict(color=AQUA, hatch="....", edgecolor="white")),
+    }
+    fig, axes = plt.subplots(1, 4, figsize=(6.5, 2.0), sharey=True)
+    x = np.arange(len(LANGS))
+    w = 0.26
+    for ax, m in zip(axes, MODELS):
+        for k, cond in enumerate("ABC"):
+            label, style = styles[cond]
+            ax.bar(x + (k - 1) * w, counts[m][cond], w * 0.88, label=label, linewidth=0, **style)
+        ax.axhline(chance[m], color=INK_2, lw=0.7, ls=(0, (3, 2)))
+        ax.set_title(m, fontsize=8, color=INK, pad=4)
+        ax.set_xticks(x)
+        ax.set_xticklabels(LANGS)
+        ax.set_ylim(0, 20)
+        ax.set_yticks([0, 5, 10, 15, 20])
+        ax.grid(axis="y", color=GRID, lw=0.5)
+        ax.set_axisbelow(True)
+        ax.tick_params(axis="x", length=0)
+    axes[0].set_ylabel("top-20 heads in layers 0-1")
+    handles, labels = axes[0].get_legend_handles_labels()
+    handles.append(Line2D([], [], color=INK_2, lw=0.7, ls=(0, (3, 2))))
+    labels.append("expected if spread evenly")
+    fig.legend(handles, labels, loc="upper center", ncol=4, bbox_to_anchor=(0.5, 1.1), fontsize=7,
+               handlelength=1.6, columnspacing=1.4)
+    fig.tight_layout(rect=(0, 0, 1, 0.93), w_pad=1.0)
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
 
 
 if __name__ == "__main__":
     overlap_dumbbell("figures/overlap_dumbbell.pdf")
-    ablation_bars("figures/ablation_bars.pdf")
-    lineage_matrix("figures/lineage_matrix.pdf")
+    layer_placement("figures/layer_placement.pdf")
+    fluency_bars("figures/fluency_bars.pdf")
