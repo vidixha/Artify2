@@ -1,42 +1,56 @@
 # TMLR draft: status
 
 `main.tex` is the author's draft reframed as an investigative report, modeled on
-arXiv:2607.16693. The title is a question, there are two research questions plus
-one exploratory question, results are reported per model, and Section 7 is a
-table giving the strength of evidence for each observation. All data, tables and
-figures are unchanged.
+arXiv:2607.16693. It now includes the author's answers about data, head
+selection, seeds and baselines, and has no `\authornote`s left.
 
-## Resolved by the reframing
+## What the answers changed
 
-- **InternVL3-2B ablation:** reported as "no distinguishable effect" across seeds
-  (11.7 ± 1.2 vs. 14.0 ± 6.2 control). It is no longer claimed as an effect "in
-  every model", and the overlap-vs-ablation mismatch is discussed with two
-  candidate explanations (T54u #3, KDop).
-- **Cross-model head positions:** moved to an exploratory subsection. It now
-  states that head numbering is not comparable across independently trained
-  models (otTP #1) and suggests a layer-level comparison instead.
-- **What LAHIS measures:** new paragraph in Section 5.2 (T54u #1).
-- **What the script-flip metric measures:** new paragraph in Section 5.5
-  (T54u comment 3).
-- **CLIP related work:** Materzyńska et al. 2022 and Gandelsman et al. 2024 are
-  now cited (KDop).
-- **Stale text:** "We previously attributed this..." removed. "Other two models"
-  fixed. The "1.6 to 8.2x" range dropped from the intro.
+- **Head scoring uses monolingual FLORES sentences.** The title, abstract,
+  research questions, Figure 2 and the Data section now say so. Code-switched
+  text enters only through the script probes and the ablation.
+- **Ablated heads are the absolute top 20 per language, not a contrast.** The
+  text no longer calls them "language-selective" and notes that the English
+  and Hindi sets overlap heavily.
+- **PaliGemma's 31% control was a single draw.** Seed means (control 7.0%) are
+  now primary, and the single run moved to Appendix C. PaliGemma's effect is
+  about 14x its control, not 3.1x.
+- **SmolVLM's ablation produces degenerate output.** Its flips equal its
+  baseline Devanagari rate, so RQ2 now has clear effects in two models, not
+  three. The Figure 5 bars are annotated.
+- **"Held-out" is removed.** The ablation samples 100 of the 806 Hindi-English
+  sentences; the 118 natural sentences are a separate set.
+- **Baseline Devanagari counts:** 5 (Qwen2-VL-2B), 11 (InternVL3-2B),
+  37 (SmolVLM), 15 (PaliGemma-3B).
+- **Related work:** added reading-from-pixels and visual-information-flow
+  citations (Rust, Tschannen, Kim, Lee, Palit, Basu, Neo).
+- **Lineage:** Qwen2.5 is described as a separate pretraining run. Section 6.4
+  shows the 18-of-20 match is largely expected, because both models place at
+  least 18 of their top 20 heads in layers 0-1 (24 heads). Two such sets must
+  share at least 12 positions and would share about 13.5 at random.
 
-## Still needs the author (red `[Author: ...]` notes in the PDF)
+## Open questions for the author
 
-1. **Section 3:** state whether the LAHIS sentences are monolingual or
-   code-switched (otTP #3, T54u #2).
-2. **Section 6.3:** PaliGemma random control is 31% in Table 3 but 7.0 ± 2.8 in
-   Table 7. Say which is right.
-3. **Section 6.4:** was Qwen2.5 initialized from Qwen2? Consider a
-   within-layer head-shuffle control for the cross-model overlap.
-4. **Section 2:** add the remaining related work KDop asked for (rendered-text
-   readability in VLMs; where OCR information enters the decoder).
-5. **Appendix C:** the three 100-sentence seed sets are drawn from 118 sentences,
-   so they overlap. Say so.
+1. Are the 806 Hindi-English sentences real GLUECoS data (as the paper says) or
+   synthetic?
+2. What are the 118 natural sentences used for? If nothing reported, drop them
+   from Section 3.
+3. Were conditions B/C in head scoring rendered images of the same monolingual
+   FLORES sentences?
+4. Which sentences do the script probes use, and how many?
+5. Which language does "18 of 20 shared positions" refer to (English gives 13)?
+   How many of each model's top 20 lie in layers 0-1?
+6. Which direction do the script flips go (Latin to Devanagari, or the reverse)
+   in Qwen2-VL-2B and PaliGemma-3B?
+7. InternVL3-2B's hi-zero rate (11.7) almost equals its baseline Devanagari rate
+   (11/100). Does it also coincide with the baseline-Devanagari items, as
+   SmolVLM's does? Are Qwen2-VL-2B's and PaliGemma's ablated outputs fluent?
 
-Remove every `\authornote` before submitting.
+## Verify before submitting
+
+- The eight new bib entries (authors, venues). They were added from memory.
+- The Qwen2.5 report (arXiv:2412.15115): check that Qwen2.5 was not
+  initialized from Qwen2 weights.
 
 ## Before camera-ready
 
@@ -46,9 +60,6 @@ Remove every `\authornote` before submitting.
 
 ## Figures
 
-- Main-body charts (overlap, ablation, cross-model head sharing) are drawn from
-  the table values by `figures/make_figures.py`. If you change a number in a
-  table, update it in that script and rerun `python3 figures/make_figures.py`
-  from `paper/`.
-- The ablation chart plots the seed means (Table 7), so it shows PaliGemma's
-  control as 7.0%. Resolve the 31% vs. 7.0% question before submitting.
+- Main-body charts are drawn from the table values by
+  `figures/make_figures.py`. If a number changes, update it there and rerun
+  `python3 figures/make_figures.py` from `paper/`.

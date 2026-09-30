@@ -123,6 +123,10 @@ def ablation_bars(path):
         ax.set_axisbelow(True)
         ax.tick_params(axis="x", length=0)
         ax.legend(loc="upper left", fontsize=7, handlelength=1.4, borderaxespad=0.2)
+    # SmolVLM's zero-ablated generations are degenerate, so its zero-ablation flips carry no routing signal.
+    for ax, top, note in ((ax1, max(hi_zero[0][2], en_zero[0][2]) + 4, "degenerate\noutputs"),
+                          (ax2, en_mean[0][2] + 4, "zero-ablated\noutputs degenerate")):
+        ax.text(2, top, note, ha="center", va="bottom", fontsize=6, color=INK_2, linespacing=0.9)
     ax1.set_ylabel("outputs whose script flips (%)")
     fig.tight_layout(w_pad=2)
     fig.savefig(path, bbox_inches="tight")
