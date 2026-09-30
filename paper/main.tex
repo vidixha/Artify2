@@ -100,7 +100,15 @@ After filtering, the corpus contains 933 code-switched sentences (806 Hindi-Engl
 Head-importance scores (Section~\ref{sec:lahis}) are computed separately for English, Spanish, and Hindi, from 100 sentences per language per condition. \authornote{State here whether these are the monolingual FLORES sentences or code-switched sentences, and if code-switched, what makes a set ``English'' or ``Hindi''. Two reviewers could not tell, and one pointed out that if they are monolingual, the overlap analysis contains no code-switching.} The script probes use the rendered code-switched sentences. The Hindi-English ablations generate from the held-out code-switched images, and the Spanish-English ablation from Spanish-English code-switched images.
 
 \paragraph{Rendering.}
-Every sentence exists as both raw text and a rendered image, black text on a white canvas, with per-token bounding boxes so patch-level attention can later be mapped back to source-language spans. Code-switched sentences render each token in a script-appropriate font, Noto Sans for Latin and Noto Sans Devanagari for Devanagari, so script boundaries are visually real rather than assumed. Appendix~\ref{app:stimuli} shows sample rendered stimuli (Figure~\ref{fig:stimuli}).
+Every sentence exists as both raw text and a rendered image, black text on a white canvas, with per-token bounding boxes so patch-level attention can later be mapped back to source-language spans. Code-switched sentences render each token in a script-appropriate font, Noto Sans for Latin and Noto Sans Devanagari for Devanagari, so script boundaries are visually real rather than assumed. Figure~\ref{fig:stimuli} shows sample rendered stimuli. Hindi-English items mix Devanagari and Latin script within a sentence; Spanish-English items stay in Latin script throughout, which is why the script-flip metric (Section~\ref{sec:ablation_method}) applies only to the Hindi-English pair.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/sample_stimuli.png}
+\caption{Four rendered code-switched sentences from the evaluation set (two Hindi--English, two Spanish--English), shown as the models see them, rendered to an image with no accompanying prompt tokens.}
+\label{fig:stimuli}
+\end{figure}
+
 
 % ============================================================
 \section{Models}
@@ -241,6 +249,14 @@ The four encoders differ substantially in how well. InternVL3-2B's InternViT rea
 
 PaliGemma-3B and SmolVLM share the same vision-encoder family (SigLIP-SO400M), yet sit at opposite extremes, 0.982 against 0.630. The two deploy it differently. PaliGemma runs SigLIP at 448px and keeps all 1024 patch tokens, whereas SmolVLM feeds it lower-resolution, pooled tokens. Within one encoder family, then, the script signal varies with resolution and token budget. All four models are given the same rendered images with the same fonts, so this spread comes from the encoders rather than the stimuli. Figure~\ref{fig:probes} shows the full per-layer trajectories.
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.62\linewidth]{figures/script_probes.png}
+\caption{Script-probe balanced accuracy (Latin vs.\ Devanagari patches, 5-fold CV) at every vision-encoder layer, all four models (dashed line: chance, 0.5). InternVL3-2B and PaliGemma-3B both rise quickly and saturate near 1.0 (0.990 and 0.982 peak). Qwen2-VL-2B rises more slowly to a lower plateau (0.811). SmolVLM stays close to its layer-0 value throughout (0.630 peak), so its weak script separability is not a matter of needing more depth. PaliGemma and SmolVLM share the SigLIP-SO400M encoder family yet sit at opposite extremes (Section~\ref{sec:probes}).}
+\label{fig:probes}
+\end{figure}
+
+
 These probes track rendered script rather than language content. We apply each model's already-trained, peak-layer Latin-versus-Devanagari probe to the 100 Hindi-in-Latin-script transliteration controls (Section~\ref{sec:data}), which are Hindi \emph{words} written in Latin \emph{glyphs}. The probe calls them Latin at a rate matching its own code-switched-data accuracy (InternVL3-2B 99.7\%, PaliGemma-3B 99.7\%, Qwen2-VL-2B 97.3\%, SmolVLM 84.0\%, against 98.8\%, 98.2\%, 80.2\%, and 62.4\% balanced accuracy on real script respectively). The probes read orthography, not the underlying language.
 
 Script identity is therefore available to every decoder in the study. Where a model's text and image paths use different heads (Section~\ref{sec:overlap}), it is not because the encoder failed to separate the scripts.
@@ -248,38 +264,15 @@ Script identity is therefore available to every decoder in the study. Where a mo
 \subsection{RQ1: whether text and image inputs share heads depends on the model}
 \label{sec:overlap}
 
-Table~\ref{tab:overlap} reports pairwise Jaccard overlap of top-20 heads across the three conditions, per model and language, against a permutation-derived chance level (95th percentile over 10{,}000 random 20-head draws). The four models show three different patterns.
+Figure~\ref{fig:overlap} plots, for each model and language, how much the top-20 heads for text overlap with those for the image alone ($\AcapC$), next to how much the two image conditions overlap with each other ($\BcapC$), against a permutation-derived chance level (95th percentile over 10{,}000 random 20-head draws). Table~\ref{tab:overlap} (Appendix~\ref{app:overlap}) gives all three pairwise overlaps. The four models show three different patterns.
 
-\begin{table}[t]
+\begin{figure}[t]
 \centering
-\caption{Jaccard overlap of top-20 heads across conditions. A = text, B = image+query, C = image-only. Lang is the language of the sentences used to compute the LAHIS scores (Section~\ref{sec:data}). Chance ($p_{95}$): 0.081 (Qwen2-VL-2B, InternVL3-2B), 0.053 (SmolVLM), 0.143 (PaliGemma-3B, whose small $18 \times 8$ head grid raises its chance level).}
-\label{tab:overlap}
-\begin{tabular}{ll ccc}
-\toprule
-Model & Lang & $\AcapB$ & $\AcapC$ & $\BcapC$ \\
-\midrule
-\multirow{3}{*}{Qwen2-VL-2B}
-  & en & 0.143 & 0.081 & 0.538 \\
-  & es & 0.081 & 0.053 & 0.538 \\
-  & hi & 0.111 & 0.176 & 0.429 \\
-\midrule
-\multirow{3}{*}{InternVL3-2B}
-  & en & 0.333 & 0.176 & 0.176 \\
-  & es & 0.538 & 0.250 & 0.212 \\
-  & hi & \textbf{0.905} & \textbf{0.667} & 0.667 \\
-\midrule
-\multirow{3}{*}{SmolVLM}
-  & en & 0.176 & 0.143 & 0.667 \\
-  & es & 0.111 & 0.111 & \textbf{0.905} \\
-  & hi & 0.250 & 0.212 & \textbf{0.905} \\
-\midrule
-\multirow{3}{*}{PaliGemma-3B}
-  & en & 0.250 & 0.333 & 0.333 \\
-  & es & 0.212 & 0.290 & 0.250 \\
-  & hi & 0.250 & 0.290 & 0.333 \\
-\bottomrule
-\end{tabular}
-\end{table}
+\includegraphics[width=\linewidth]{figures/overlap_dumbbell.pdf}
+\caption{Do text and image inputs recruit the same heads? Each row compares text-vs-image overlap ($\AcapC$, circles) with image-vs-image overlap ($\BcapC$, squares) for one language. A long bar means the image conditions agree with each other but not with text. Where the markers coincide, text and image agree as much as the two image conditions do. The shaded band is each model's chance level ($p_{95}$: 0.081 for Qwen2-VL-2B and InternVL3-2B, 0.053 for SmolVLM, 0.143 for PaliGemma-3B). Values are in Table~\ref{tab:overlap}.}
+\label{fig:overlap}
+\end{figure}
+
 
 \paragraph{Separate heads: Qwen2-VL-2B and SmolVLM.}
 In both models, text-image overlap ($\AcapC$) stays low across every language tested (0.05--0.21), while the two image conditions cluster tightly together ($\BcapC$ 0.43--0.91, reaching its highest values for SmolVLM). Once an image is present, these models recruit a consistent head set whether or not a text instruction accompanies it, and that set differs substantially from the heads that matter for the same sentence as text. The LAHIS maps make the difference visible: Qwen2-VL-2B's text-condition importance sits in layers 0--1, while its image conditions draw on heads throughout the network (Figure~\ref{fig:lahis_hi}).
@@ -317,7 +310,14 @@ Random-20 (control) & 9\% & 9\% & 9\% & 31\% \\
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:ablation} reports how often ablating each model's top-20 language-selective heads flips the output script on 100 held-out Hindi-English code-switched images, and Table~\ref{tab:seeds} (Appendix~\ref{app:seeds}) repeats the ablation over three seeds.
+Table~\ref{tab:ablation} reports how often ablating each model's top-20 language-selective heads flips the output script on 100 held-out Hindi-English code-switched images, and Table~\ref{tab:seeds} (Appendix~\ref{app:seeds}) repeats the ablation over three seeds. Figure~\ref{fig:ablation} plots the seed results.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/ablation_bars.pdf}
+\caption{Does ablating the top heads change output script? Percent of held-out Hindi-English generations whose output script flips, as mean $\pm$ standard deviation over three seeds (Table~\ref{tab:seeds}). (a) Zero-ablating each model's top-20 Hindi or English heads, against 20 random heads. Three models clear the control by a wide margin; InternVL3-2B does not. (b) For English heads, mean ablation flips more outputs than zero ablation in SmolVLM and PaliGemma-3B, and fewer in the other two.}
+\label{fig:ablation}
+\end{figure}
 
 \paragraph{Clear effects: Qwen2-VL-2B, SmolVLM, and PaliGemma-3B.}
 In these three models, zero-ablating the top heads flips output script far more often than ablating random heads. Qwen2-VL-2B's Hindi heads flip 74\% of generations against a 9\% control (70.3 $\pm$ 5.0 against 7.0 $\pm$ 4.9 across seeds), and SmolVLM's flip 37\% against 9\% (35.3 $\pm$ 2.1 against 8.7 $\pm$ 0.9). PaliGemma-3B's Hindi heads flip 97\% of generations (97.3 $\pm$ 0.5 across seeds), the largest effect in the study. Bootstrap 95\% confidence intervals (10{,}000 resamples over the 100 images) do not overlap with the control for these effects: PaliGemma-3B's hi-zero is 97\% [93,100] against its 31\% [22,40] control, and Qwen2-VL-2B's hi-zero is 74\% [65,82] against 9\% [4,15].
@@ -360,7 +360,14 @@ PaliGemma-3B & \textbf{85\%} & \textbf{82\%} & 19\% \\
 
 Within each model, most of the top-20 text-condition heads are shared across all three languages. Qwen2-VL-2B shares 18 of 20, InternVL3-2B 14 of 20, SmolVLM 14 of 20, and PaliGemma-3B 15 of 20. Most heads that LAHIS ranks highly are therefore language-\emph{general}, consistent with what the score measures (Section~\ref{sec:lahis}).
 
-Across models, we compared the (layer, head) positions of each model's top-20 text-condition heads. Qwen2-VL-2B and InternVL3-2B, which have different vision encoders but decoders from the same family, share 18 of their 20 positions (a raw count; Jaccard $18/22 \approx 0.818$). Every other pair shares fewer. PaliGemma-3B shares 8 positions with Qwen2-VL-2B and 9 with InternVL3-2B, SmolVLM shares 2 and 1, and SmolVLM and PaliGemma-3B share none. All shared positions lie in the first two layers. The ordering does not follow language competence: even for English, where SmolVLM's competence is within 10\% of the Qwen pair (char-ppl 2.23 against 2.04--2.06), it shares only 2 and 1 English top-20 positions against the Qwen pair's 13. Nor does it follow the vision encoder: PaliGemma-3B and SmolVLM use the same SigLIP-SO400M family but share no positions.
+Across models, we compared the (layer, head) positions of each model's top-20 text-condition heads. Figure~\ref{fig:lineage} shows the counts. Qwen2-VL-2B and InternVL3-2B, which have different vision encoders but decoders from the same family, share 18 of their 20 positions (a raw count; Jaccard $18/22 \approx 0.818$). Every other pair shares fewer. PaliGemma-3B shares 8 positions with Qwen2-VL-2B and 9 with InternVL3-2B, SmolVLM shares 2 and 1, and SmolVLM and PaliGemma-3B share none. All shared positions lie in the first two layers. The ordering does not follow language competence: even for English, where SmolVLM's competence is within 10\% of the Qwen pair (char-ppl 2.23 against 2.04--2.06), it shares only 2 and 1 English top-20 positions against the Qwen pair's 13. Nor does it follow the vision encoder: PaliGemma-3B and SmolVLM use the same SigLIP-SO400M family but share no positions.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.5\linewidth]{figures/lineage_matrix.pdf}
+\caption{Number of (layer, head) positions shared between each pair of models' top-20 text-condition heads, with each model's decoder family in parentheses. We report this as a description only: head numbering is not comparable across independently trained models (Section~\ref{sec:lineage}).}
+\label{fig:lineage}
+\end{figure}
 
 We treat this as a description rather than a finding, for three reasons.
 \begin{itemize}
@@ -441,15 +448,40 @@ We investigated whether small VLMs process the same code-switched sentence throu
 \clearpage
 \appendix
 
-\section{Full Script-Probe Trajectories}
-\label{app:probes}
 
-\begin{figure}[H]
+\section{Full Overlap Values}
+\label{app:overlap}
+
+\begin{table}[H]
 \centering
-\includegraphics[width=0.8\linewidth]{figures/script_probes.png}
-\caption{Script-probe balanced accuracy (Latin vs.\ Devanagari patches, 5-fold CV) at every vision-encoder layer, all four models (dashed line: chance, 0.5). InternVL3-2B and PaliGemma-3B both rise quickly and saturate near 1.0 (0.990 and 0.982 peak). Qwen2-VL-2B rises more slowly to a lower plateau (0.811). SmolVLM stays close to its layer-0 value throughout (0.630 peak), so its weak script separability is not a matter of needing more depth. PaliGemma and SmolVLM share the SigLIP-SO400M encoder family yet sit at opposite extremes (Section~\ref{sec:probes}).}
-\label{fig:probes}
-\end{figure}
+\caption{Jaccard overlap of top-20 heads across conditions. A = text, B = image+query, C = image-only. Lang is the language of the sentences used to compute the LAHIS scores (Section~\ref{sec:data}). Chance ($p_{95}$): 0.081 (Qwen2-VL-2B, InternVL3-2B), 0.053 (SmolVLM), 0.143 (PaliGemma-3B, whose small $18 \times 8$ head grid raises its chance level).}
+\label{tab:overlap}
+\begin{tabular}{ll ccc}
+\toprule
+Model & Lang & $\AcapB$ & $\AcapC$ & $\BcapC$ \\
+\midrule
+\multirow{3}{*}{Qwen2-VL-2B}
+  & en & 0.143 & 0.081 & 0.538 \\
+  & es & 0.081 & 0.053 & 0.538 \\
+  & hi & 0.111 & 0.176 & 0.429 \\
+\midrule
+\multirow{3}{*}{InternVL3-2B}
+  & en & 0.333 & 0.176 & 0.176 \\
+  & es & 0.538 & 0.250 & 0.212 \\
+  & hi & \textbf{0.905} & \textbf{0.667} & 0.667 \\
+\midrule
+\multirow{3}{*}{SmolVLM}
+  & en & 0.176 & 0.143 & 0.667 \\
+  & es & 0.111 & 0.111 & \textbf{0.905} \\
+  & hi & 0.250 & 0.212 & \textbf{0.905} \\
+\midrule
+\multirow{3}{*}{PaliGemma-3B}
+  & en & 0.250 & 0.333 & 0.333 \\
+  & es & 0.212 & 0.290 & 0.250 \\
+  & hi & 0.250 & 0.290 & 0.333 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \section{$K$-Sweep}
 \label{app:ksweep}
@@ -527,16 +559,5 @@ Figure~\ref{fig:lahis_hi} shows the raw per-head LAHIS importance behind the ove
 \label{fig:lahis_es}
 \end{figure}
 
-\section{Sample Stimuli}
-\label{app:stimuli}
-
-Figure~\ref{fig:stimuli} shows representative rendered code-switched stimuli. Hindi--English items mix Devanagari and Latin script within a sentence; Spanish--English items stay in Latin script throughout, which is why the script-flip metric (Section~\ref{sec:ablation_method}) applies only to the Hindi--English pair.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.85\linewidth]{figures/sample_stimuli.png}
-\caption{Four rendered code-switched sentences from the evaluation set (two Hindi--English, two Spanish--English), shown as the models see them, rendered to an image with no accompanying prompt tokens.}
-\label{fig:stimuli}
-\end{figure}
 
 \end{document}

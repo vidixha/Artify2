@@ -43,3 +43,12 @@ Remove every `\authornote` before submitting.
 - Switch to `\usepackage[accepted]{tmlr}` and fill in `\month`, `\year` and
   `\openreview`.
 - `deuchar2013bangor` has no publisher.
+
+## Figures
+
+- Main-body charts (overlap, ablation, cross-model head sharing) are drawn from
+  the table values by `figures/make_figures.py`. If you change a number in a
+  table, update it in that script and rerun `python3 figures/make_figures.py`
+  from `paper/`.
+- The ablation chart plots the seed means (Table 7), so it shows PaliGemma's
+  control as 7.0%. Resolve the 31% vs. 7.0% question before submitting.
